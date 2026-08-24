@@ -1,7 +1,6 @@
 """Release Manager application factory."""
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
-import requests
 from .config import Settings
 from .github_client import GitHubClient
 from .routes import router

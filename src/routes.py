@@ -35,6 +35,8 @@ def publish_pack(pack_id:str,request:Request):
     try: return primitive(publish(*deps(request),pack_id,now()))
     except StateError as exc: raise HTTPException(409,str(exc))
 @router.post("/api/packs/{pack_id}/reconcile")
-def reconcile_pack(pack_id:str,request:Request): return {"result":reconcile(*deps(request),pack_id,now())}
+def reconcile_pack(pack_id:str,request:Request):
+    try: return {"result":reconcile(*deps(request),pack_id,now())}
+    except StateError as exc: raise HTTPException(409,str(exc))
 @router.get("/api/audit")
 def audit(request:Request): return deps(request)[0].audit()

@@ -1,14 +1,36 @@
 """Small direct GitHub REST adapter; create_release is its only write method."""
-from datetime import datetime
 from typing import Any, Callable
-import requests
+import json
+from urllib.error import HTTPError
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 from .models import Evidence, Release, Repository
+
+
+class _Response:
+    def __init__(self, status_code, headers, payload):
+        self.status_code, self.headers, self._payload = status_code, headers, payload
+    def json(self):
+        return json.loads(self._payload.decode("utf-8"))
+
+
+def _stdlib_request(method, url, headers=None, timeout=20, params=None, json=None):
+    """Minimal requests-compatible transport, avoiding an undeclared runtime dependency."""
+    if params:
+        url += ("&" if "?" in url else "?") + urlencode(params)
+    data = None if json is None else __import__("json").dumps(json).encode("utf-8")
+    request = Request(url, data=data, headers=headers or {}, method=method)
+    try:
+        response = urlopen(request, timeout=timeout)
+        return _Response(response.status, dict(response.headers), response.read())
+    except HTTPError as exc:
+        return _Response(exc.code, dict(exc.headers), exc.read())
 
 class GitHubError(RuntimeError): pass
 class GitHubTransportError(GitHubError): pass
 
 class GitHubClient:
-    def __init__(self, owner: str, repo: str, token: str, request: Callable[...,Any]=requests.request):
+    def __init__(self, owner: str, repo: str, token: str, request: Callable[...,Any]=_stdlib_request):
         self.owner,self.repo,self._token,self._request=owner,repo,token,request
         self.base=f"https://api.github.com/repos/{owner}/{repo}"
     def _call(self, method: str, url: str, **kwargs: Any) -> Any:
