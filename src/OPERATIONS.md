@@ -1,0 +1,64 @@
+# Release Manager operations
+
+This in-package guide exists because this build phase is restricted to writing
+`src/` and `tests/`. The repository-level README should link to or incorporate
+it in a later unrestricted phase.
+
+## Clean setup and startup
+
+Run `./init.sh`, then export all three required values:
+
+```bash
+export GITHUB_OWNER=my-organization
+export GITHUB_REPO=my-repository
+export GITHUB_TOKEN='github-token-with-repository-read-and-release-write-access'
+# Optional; use a persistent path in production:
+export RELEASE_MANAGER_DB=/var/lib/release-manager/release-manager.db
+.venv/bin/uvicorn src.app:app
+```
+
+Startup creates the SQLite schema and makes an authenticated read of
+`GITHUB_OWNER/GITHUB_REPO` before serving. Missing configuration, an invalid
+token, an unreadable repository, rate limiting, or transport failure prevents
+startup. `GET /health` returns `{"status":"ok"}` only after startup succeeds.
+Do not put the token in command-line arguments, API bodies, or the database.
+
+The JSON workflow is:
+
+1. `POST /api/scans` (read-only scan and deterministic draft when worthy).
+2. `GET /api/packs/{id}` to inspect all text and evidence references.
+3. `POST /api/packs/{id}/approve` with `{"actor":"human name"}`, or
+   `/reject` with `{"actor":"human name","reason":"..."}`.
+4. `POST /api/packs/{id}/publish` only after approval.
+5. If publication is uncertain, `POST /api/packs/{id}/reconcile`. An absent
+   release makes one retry safe; a matching release records success without a
+   duplicate; a conflict requires human investigation.
+6. `GET /api/audit` returns chronological retained product evidence.
+
+The announcement is copy/paste text only and is never sent by the service.
+
+## Verification
+
+The default suite is offline and needs no credentials:
+
+```bash
+.venv/bin/python -m pytest -q
+```
+
+For real acceptance use a dedicated disposable repository and a token supplied
+by the operator. Start the service with that repository, scan and inspect the
+pack, approve it, publish once, and independently fetch
+`GET /repos/{owner}/{repo}/releases/tags/{tag}`. Verify `tag_name`, `name`, and
+`body` equal the pack, and verify `/api/audit` has `publish_success`, approver,
+version, time, and URL. Release cleanup is deliberately manual; the product has
+no delete operation.
+
+## Shipyard evidence
+
+Product audit rows are not Shipyard build evidence. In an environment where
+the harness provides Shipyard, inspect the genuine run with `shipyard runs` or
+the yard view, and query the harness-created `.shipyard/trace.db` for the
+request, plan, build, verify, review, accept phases, gates/retries, and criteria
+scorecard. This checkout has no importable Shipyard runtime API; `src/workflow.py`
+therefore declares the five application callbacks for harness registration and
+does not fabricate a trace or implement a substitute scheduler.
