@@ -1,20 +1,30 @@
-"""The seed application.
-
-Deliberately almost empty. It exists so that the test suite is GREEN the moment
-bootstrap finishes — which is what lets a later phase tell "I broke this" from
-"this was already broken". A scaffold that starts red teaches an agent that red
-is normal.
-
-Layers, innermost first: models -> github_client -> phases -> routes.
-Dependencies run downward only. This app becomes the review interface and API
-surface a later `routes` layer builds on top of `/health` — not a separate app.
-"""
-
+"""Release Manager application factory."""
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
+import requests
+from .config import Settings
+from .github_client import GitHubClient
+from .routes import router
+from .store import Store
 
-app = FastAPI(title="release-manager")
+def create_app(settings:Settings|None=None, github=None, validate:bool=True) -> FastAPI:
+    configured=settings is not None
+    @asynccontextmanager
+    async def lifespan(app:FastAPI):
+        if validate:
+            cfg=settings or Settings.from_env()
+            app.state.store=Store(cfg.database)
+            app.state.github=github or GitHubClient(cfg.owner,cfg.repo,cfg.token)
+            app.state.github.repository()  # fail loud before serving
+        yield
+    application=FastAPI(title="release-manager",lifespan=lifespan)
+    application.include_router(router)
+    @application.get("/health")
+    def health(): return {"status":"ok"}
+    # Explicit injected dependencies may be used without lifespan in unit tests.
+    if settings and github:
+        application.state.store=Store(settings.database); application.state.github=github
+    return application
 
-
-@app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok"}
+# Import remains safe for health tooling; production validation occurs at startup.
+app=create_app()
