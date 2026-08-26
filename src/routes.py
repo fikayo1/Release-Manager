@@ -1,19 +1,18 @@
 """Operator JSON API and progressively enhanced server-rendered review UI."""
 from datetime import datetime, timezone
-from pathlib import Path
 from urllib.parse import parse_qs
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
-from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from .models import primitive
+from .templating import Templates
 from .phases import approve, draft, publish, reconcile, reject, scan
 from .store import StateError
 
 router = APIRouter()
-templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+templates = Templates()
 
 
 def now():
