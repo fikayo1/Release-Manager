@@ -1,158 +1,91 @@
-# Release Manager implementation plan
+# Release Manager review interface plan
 
-## Scope and architectural direction
+## Approach
 
-Build the product into the existing FastAPI seed rather than replacing it. The service remains one process, one configured GitHub repository, one SQLite audit database, and one server-rendered operator interface. Runtime behavior is split into the five named governed phases `scan`, `draft`, `review`, `publish`, and `rollback` (where rollback is reconciliation/recovery, not deletion of a GitHub Release). Phase inputs and outputs will be typed and persisted at each boundary. The phase implementations will be registered with the Shipyard phase/gate API available to the build environment; the application will not introduce a generic workflow scheduler or a second autonomy engine. If that runtime API is not actually available in this checkout, the builder must surface that integration gap rather than silently inventing a substitute and claiming Shipyard governance.
+Add a progressively enhanced, server-rendered review UI to the existing FastAPI application. The current SQLite store, pack identifiers/statuses, decision functions, publication/reconciliation behavior, JSON API, and audit records remain canonical; HTML routes will call the same workflow functions rather than implement a parallel state machine. Jinja templates and a local stylesheet are sufficient—there will be no SPA, frontend framework, or asset build.
 
-The GitHub token is an environment-only secret. `GITHUB_OWNER`, `GITHUB_REPO`, and `GITHUB_TOKEN` are loaded at process startup, are never accepted in request bodies, and are never written to SQLite, responses, audit details, or logs. `RELEASE_MANAGER_DB` may select the SQLite path for deployment/tests. Application startup initializes the schema and performs a real repository-read check before serving traffic. Tests will construct the application with injected settings, clock, database path, and fake raw HTTP transport so they need neither network access nor credentials.
+The existing `/api/...` routes remain available to CLI and cron clients. Their decision validation will be aligned with the new contract: both approval and rejection require a non-blank human reason. Approval will execute the existing approval transition and immediately invoke the existing publication phase. If GitHub publication fails, the response will be an error and the store's canonical non-success publication state/audit record will remain visible; neither JSON nor HTML will claim publication succeeded. Rejection will retain the pack and record its rejected status, actor, reason, and audit event.
 
-The workflow state is monotonic and enforced in the service layer and database: a scan is an immutable snapshot; only a release-worthy scan can produce one immutable pack; a pack starts pending; exactly one human decision changes it to approved or rejected; only approved packs can begin publishing; uncertain publication must be reconciled against GitHub before any retry; rejected packs and every attempt remain queryable. There is no autonomy-tier input or auto-approval setting.
+No authentication is added. Network access is the current access boundary and the pages will state actions plainly without implying authorization that does not exist.
 
-## Intended files
+## Files to change or create
 
-Existing files to update:
+### Existing files to update
 
-- `src/app.py` — application factory, FastAPI lifespan wiring, dependency assembly, error handling, and retention of `/health`.
-- `src/__init__.py` — package metadata/exports only as needed.
-- `requirements.txt` — pin/add the minimal server-rendering and form dependencies (`jinja2`, `python-multipart`) while retaining FastAPI, requests, uvicorn, and pytest support.
-- `README.md` — operator setup, required environment, database and startup behavior, API/UI workflow, recovery procedure, test commands, real-repository acceptance procedure, and how to inspect the genuine Shipyard build trace.
-- `.gitignore` — continue excluding local secrets, virtual environments, caches, and runtime databases without excluding checked-in documentation/evidence manifests.
-- `tests/test_health.py` — adapt the smoke test to the application factory so startup validation can be faked without weakening production startup behavior.
-- `criteria.json` — do not edit descriptions, verification, order, or IDs; only flip individual `passes` flags after the corresponding checks genuinely pass, as required by the scaffold contract.
+- `requirements.txt` — add the minimal Jinja template and HTML form parsing dependencies, with no JavaScript framework or build tooling.
+- `src/app.py` — mount the local static directory, configure template-capable routing as needed, and retain the existing application factory, startup repository validation, `/health`, and dependency injection used by tests.
+- `src/routes.py` — retain all existing JSON endpoints and add HTML list/detail/decision routes. Add shared decision request validation and orchestration so approval requires a reason and triggers publication, rejection requires a reason, API errors remain truthful, HTML form failures render useful messages, and successful form posts use redirect-after-post.
+- `src/phases/review.py` — pass the required approval reason into the canonical store decision operation, keeping review transitions centralized.
+- `src/store.py` — require a non-blank reason for both decision types and add read-only queries/view support for reverse-chronological pack listing, scan evidence, and pack-scoped chronological audit activity. Existing durable transition, attempt, and audit semantics remain intact.
+- `src/OPERATIONS.md` — document the review URLs, no-auth/network-access posture, approval-publishes behavior, failure/recovery expectations, and the required `GITHUB_TOKEN`, `GITHUB_OWNER`, and `GITHUB_REPO` variables while preserving API/CLI guidance.
+- `tests/test_governance.py` — update approval tests for mandatory reasons and verify both decision types persist their reasons.
+- `tests/test_recovery_audit.py` — update fixtures/calls for reason-required approval while retaining interrupted-publication coverage.
 
-Product files to create:
+### New UI files
 
-- `src/config.py` — immutable environment settings and fail-fast validation for owner/repository/token/database configuration, with redacted representations.
-- `src/models.py` — typed domain records and enums for repository metadata, release baseline, scanned commit/PR evidence, verdict, release pack and claim references, human decision, publish attempt/receipt, reconciliation result, and legal statuses.
-- `src/store.py` — hand-written `sqlite3` schema/bootstrap, transactions, guarded state transitions, immutable snapshot/pack writes, append-only audit events, and read models. Tables will cover scans and their captured evidence, verdicts, packs and pack claim references, review decisions, publish attempts, receipts/reconciliation, and audit events. Foreign keys/check constraints and compare-and-set updates will prevent invalid or concurrent transitions.
-- `src/github_client.py` — thin direct GitHub REST client over an injected raw request callable. It will expose visibly separate read methods (`repository`, `latest_release`, `commits_since`, `merged_pulls_since`, `release_for_tag`) and the sole write method (`create_release`), implement `Link` pagination and response parsing itself, send bearer/Accept/pinned API-version headers, and map authentication, visibility, rate-limit, GitHub-body, malformed-response, and transport failures to safe specific errors.
-- `src/classification.py` — deterministic change normalization and release-worthiness rules with evidence IDs and reasons. PR evidence is the downstream source when the snapshot has merged PRs; commits are the fallback when it does not, while both raw lists remain in the scan. Case-insensitive breaking labels (`breaking`, `breaking-change`, `breaking change`), conventional `!` markers, and `BREAKING CHANGE` markers drive breaking changes; `feat`/feature/enhancement drives features; `fix`/bug drives fixes; docs-only or empty inputs are not release-worthy. Unknown-only change sets are not release-worthy rather than producing an unexplained release.
-- `src/versioning.py` — strict semantic-version parsing from the latest published release tag and deterministic major/minor/patch calculation. Leading `v` is preserved for the proposed GitHub tag. For a first release, use `0.0.0` as the calculation base, yielding `1.0.0` for breaking, `0.1.0` for feature, or `0.0.1` for fix; malformed prior release tags fail clearly rather than guessing.
-- `src/pack.py` — deterministic pack construction from the stored scan/verdict only: grouped feature/fix/other changelog, GitHub Markdown release title/body, short copyable announcement, version rationale, and an explicit reference from every generated claim/line to evidence in that scan.
-- `src/phases/__init__.py` — phase registration/export surface.
-- `src/phases/scan.py` — governed read-only scan phase: resolve the latest published non-draft/non-prerelease baseline, use its `published_at` cutoff or repository creation time for the explicit first-release case, collect and persist the exact commit and merged-PR snapshot, then persist the evidence-backed verdict. No call path to `create_release` is present.
-- `src/phases/draft.py` — governed draft phase that stops cleanly for a non-worthy verdict and otherwise creates the typed immutable pack from its stored scan without re-fetching GitHub.
-- `src/phases/review.py` — mandatory autonomy hold and approve/reject transitions, requiring a nonblank operator identifier and requiring a rejection reason; decisions are timestamped and retained.
-- `src/phases/publish.py` — deterministic publish script that loads the already-approved pack, records an attempt before the external call, sends exactly its tag/title/body to `create_release`, and records the returned URL/receipt. It performs no drafting or judgment and never posts the announcement.
-- `src/phases/rollback.py` — interrupted/failed publish reconciliation. It checks `release_for_tag` before presenting an action: an existing matching release can be marked resolved and recorded as success; an absent release can be marked retry-safe; a conflicting release blocks both actions for operator investigation. Retry is accepted only from a recorded retry-safe reconciliation and creates a new retained attempt.
-- `src/workflow.py` — Release Manager-specific registration/composition of the five phase callables and their gates with the real Shipyard runtime interface. It contains no generic queue, retry scheduler, model agent, autonomy-tier bypass, or alternate phase engine.
-- `src/routes.py` — JSON API and HTML routes for starting/viewing scans, viewing verdicts and packs, pending review, approve/reject, publish, reconcile, mark-resolved/retry, and querying audit history. Route handlers delegate all state and authorization checks to phase/services so an alternate route cannot bypass approval.
-- `src/templates/base.html` — minimal shared accessible layout and status/error presentation.
-- `src/templates/index.html` — configured repository summary, scan action, recent workflow records, and links to audit history.
-- `src/templates/scan.html` — baseline/no-prior-release status, fixed cutoff/timestamp, full commit and PR evidence fields/links, and visible verdict rationale.
-- `src/templates/review_list.html` — pending packs only, with clear status/version links.
-- `src/templates/pack.html` — complete pack, supporting evidence and claim links, human identity/reason form, publish/recovery controls shown only for legal states, and retained decision/attempt history.
-- `src/templates/audit.html` — chronological, queryable product audit trail separate from Shipyard build evidence.
-- `src/static/style.css` — small local stylesheet; no frontend build or client-side workflow engine.
-- `tests/conftest.py` — temporary SQLite/app fixtures, deterministic clock, raw fake GitHub transport/responses, and call recorder that can prove read/write separation.
-- `tests/test_config.py` — missing settings, redaction, startup validation, and 401/403/404/rate-limit/transport error behavior.
-- `tests/test_github_client.py` — required headers, repository parsing, latest-release 404 semantics, commit `Link` pagination and strict cutoff filtering, pull pagination/early stop and merged-date filtering, first-release metadata, response errors, release lookup, and create payload/receipt parsing.
-- `tests/test_scan.py` — prior-release and no-prior-release snapshots with every required evidence field, storage immutability, deterministic PR preference/fallback, and an assertion that scan made zero GitHub write calls.
-- `tests/test_classification.py` — release-worthy feature/fix/breaking cases and empty/docs-only/unknown non-worthy cases, all with specific evidence and stated reasons.
-- `tests/test_pack.py` — semver precedence/first-release behavior, grouping/rendering, complete pack fields, and invariant that every version/changelog claim references an item in the stored scan.
-- `tests/test_review_publish.py` — pending publish refusal, mandatory identity/rejection reason, approval and rejection persistence, retained rejected pack, exact approved payload, receipt/audit data, double-submit/concurrency guards, and absence of an auto-approval path.
-- `tests/test_recovery.py` — failure before response, simulated success followed by lost response/process interruption, existing/absent/conflicting release reconciliation, mark-resolved, retry-safe gate, and proof that no retry occurs before a GitHub lookup.
-- `tests/test_routes.py` — JSON and server-rendered journeys, pending list/detail evidence, form actions, invalid-state responses, audit queryability, and assurance that API inputs cannot set repository credentials or an autonomy tier.
-- `tests/test_security_scope.py` — source/behavior guard tests that secrets are not serialized/logged/persisted, scan is read-only, announcement has no send action/integration, and every publish entry point requires an approved state.
-- `tests/test_real_github_acceptance.py` — explicitly opt-in operator test, skipped unless dedicated acceptance environment variables are set, that creates a uniquely tagged release in the designated real test repository and verifies tag/title/body and stored receipt. It must never run in the default offline suite.
-- `Dockerfile` — reproducible single-process deployment image with no token baked into layers and a persistent database mount point.
-- `.dockerignore` — omit virtualenv, caches, databases, VCS internals, and local secret files from the image context.
+- `src/templates/base.html` — accessible document shell, local stylesheet link, semantic status/error region, and shared page structure.
+- `src/templates/review_list.html` — primary review page with the reverse-chronological pack collection, connected vertical status timeline sidebar, selected/current fallback behavior, and a card for every pack.
+- `src/templates/pack_detail.html` — full pack review showing version, status, changelog, release notes, announcement, supporting commit/PR links, audit history, and state-appropriate approve/reject forms.
+- `src/static/review.css` — responsive minimalist styling: white background, sans-serif type, generous spacing, 1px borders, no shadows, timeline dots/connectors, large metric values with small muted labels, and semantic amber/green/red/blue color use only.
 
-No Slack, Discord, generic webhook, model-client, account system, multi-repository, ORM, or release-deletion file/module will be added.
+No JavaScript file is planned because all navigation, validation, submission, and feedback can work with ordinary links and forms. JavaScript should be added only if a later implementation identifies a small enhancement that leaves the complete no-JavaScript flow intact.
+
+### New or expanded tests
+
+- `tests/test_review_ui.py` — server-rendered list/detail tests covering ordering, selection fallback, timeline/card content, semantic statuses, published metrics, evidence links, action visibility, non-JavaScript form submission, validation errors, success redirects, and truthful publication failure rendering.
+- `tests/test_routes.py` — API regression tests proving existing pack/audit routes remain usable, approve/reject both reject blank reasons, approval immediately attempts publication, rejection does not publish, and publication errors do not return success.
+
+Implementation may place small private view-model helpers in `src/routes.py`. A separate `src/view_models.py` should be created only if route preparation becomes large enough to obscure request handling; it is not otherwise planned.
 
 ## Build order
 
-1. **Preserve and characterize the seed.** Run the existing tests; introduce the app-factory test fixture without changing `/health`; confirm `criteria.json` remains structurally untouched and that the real Shipyard request/plan/build trace is being produced by the harness rather than fabricated by this product.
-2. **Define configuration and domain contracts.** Add `config.py` and `models.py`, including redaction and the complete state machine. Add configuration tests first. This gives every later phase typed, reviewable inputs/outputs.
-3. **Create durable storage and audit invariants.** Add `store.py` with idempotent schema bootstrap, foreign keys, UTC timestamps, transactions, uniqueness, immutable evidence/pack records, and guarded transitions. Test restart persistence and illegal/concurrent transitions before adding external effects. Audit events are append-only and reference the relevant scan/pack/attempt.
-4. **Build the GitHub seam.** Add `github_client.py` and raw-response fake tests. Validate the repository in FastAPI lifespan. Implement precise errors and pagination in the real client while the fake supplies only status/JSON/headers or a transport exception, ensuring parsing and cutoff logic are genuinely tested. The token may exist only in in-memory settings/client headers.
-5. **Implement and verify scan.** Add the scan phase, its phase registration, and tests for both baselines. `releases/latest` 404 means `no_prior_release=true` and repository `created_at` is the first-run cutoff. Commits use `since` plus the default branch, follow `Link`, and are retained only when commit date is strictly after cutoff. Closed PR pages are ordered by `updated` descending, retain only actually merged PRs with `merged_at` strictly after cutoff, and stop after a page whose `updated_at` values are all at/before cutoff. Capture PR labels and merge SHA in addition to displayed number/title/author/date/URL. Store commits and PRs separately without altering GitHub data.
-6. **Implement deterministic decision and draft.** Add classification, versioning, pack construction, and their tests. Persist a complete not-worthy verdict and stop before creating a pack. For worthy scans, derive only from the stored snapshot and create claim-to-evidence rows so traceability is machine-checkable, not merely visual.
-7. **Add mandatory review hold.** Add review phase and tests for one-time approval/rejection, actor/time/reason audit details, rejection retention, and all illegal transitions. Register it as a mandatory human gate with no autonomy override.
-8. **Add deterministic publish and audit receipt.** Add publish phase and tests. In one transaction, atomically claim an approved pack and append an `started` attempt before calling GitHub; then append success with immutable tag/title/body digest/body, URL, timestamp, and approving decision, or append a definitive/uncertain failure. Do not hold a SQLite transaction open during network I/O. All route/script entry points call the same approved-state guard.
-9. **Add rollback/reconciliation before enabling retry.** Add the GitHub release-by-tag read and rollback phase. Reconciliation always performs and records a fresh GitHub lookup. A matching existing release is never republished; an absent release is the only state that can enable retry; mismatched tag/title/body is a conflict, not success. Test interruption after GitHub has created the release but before the receipt commit.
-10. **Expose API and human UI.** Add routes, templates, and CSS after state rules are covered. Pages must display the proposed version, all pack text, per-claim evidence links, actor/reason history, attempt outcomes, and only state-valid actions. JSON audit endpoints provide the same inspectability. Use POST for mutations and redirect-after-post for forms; validate all inputs server-side. No repository/token configuration endpoint exists.
-11. **Wire application lifecycle and Shipyard governance.** Compose settings, client, store, phases, gates, and routes in `app.py`; initialize storage then validate GitHub in lifespan. Register the exact `scan -> draft -> review -> publish -> rollback` phase graph through the harness runtime, with draft ending successfully on a not-worthy verdict and review always holding. Verify phase/gate events appear in the genuine Shipyard execution trace; do not copy Release Manager audit rows into that trace or vice versa.
-12. **Deployment and operations.** Add container files and expand README with clean setup, environment variables, persistent volume, startup-failure examples, recovery runbook, API/UI paths, dedicated real-test-repository precautions, and commands for inspecting `.shipyard/trace.db`/`shipyard runs`/yard. The default test and startup documentation must not imply a token can be omitted in production; tests use explicit dependency injection.
-13. **End-to-end verification and acceptance updates.** Run `./init.sh` from a clean state and the default offline pytest suite. Exercise two restart-spanning fake-GitHub journeys: docs-only scan stopping with an auditable verdict, and feature/fix scan through approval/publish plus interrupted-publish reconciliation. With operator-provided credentials, run the opt-in real GitHub acceptance once against a designated disposable repository and clean up only manually after evidence capture. Inspect source for forbidden integrations/bypasses and inspect the genuine Shipyard trace. Only then flip each satisfied `criteria.json` `passes` value; never alter criterion text.
+1. **Characterize existing contracts.** Run the current offline tests and inspect the pack, scan, status, publication, reconciliation, and audit representations. Preserve route paths and response shapes except for the specified mandatory approval reason and approval-triggered publication behavior.
+2. **Add read models and decision validation.** Extend `Store` with deterministic reverse-chronological pack listing, scan lookup, and pack audit filtering. Enforce trimmed, non-blank reasons for approval and rejection at the store boundary so HTML, API, and direct workflow callers cannot bypass the rule. Update review phase signatures and focused governance/recovery tests.
+3. **Unify API decision orchestration.** Update the existing approve endpoint to validate actor/reason, record approval, and immediately invoke publication; update rejection validation without introducing a write. Map validation/state errors to non-success API responses and external publication failures to non-success responses while relying on the existing durable attempt/status/audit handling. Keep the explicit publish and reconciliation endpoints for compatibility and recovery, subject to their canonical status guards.
+4. **Build presentation view data.** For each pack, combine canonical pack data with its creation time, relevant audit events, and stored scan evidence. Sort packs by creation timestamp descending with a deterministic ID tie-break. Honor an explicit canonical current marker if one becomes available; because the current model has no such marker, select the newest pack by default. Derive published-only metrics from the stored scan and rendered changelog: commit count, pull-request count, and count of non-blank changelog item lines.
+5. **Add templates and styling.** Implement the shared shell, review list, pack detail, and local CSS. Use semantic HTML, visible keyboard focus, labels associated with fields, status text in addition to color, real links, and responsive layout. Do not rely on client-side rendering or submission.
+6. **Wire HTML routes.** Make the primary review route render all packs and accept a selected pack query/path state. Add a stable full-review URL per pack and POST approve/reject form routes. Missing packs return a real 404 page/response; invalid reasons and workflow/publication errors re-render the detail with a visible error and proper non-success status; successful decisions redirect to the canonical detail page.
+7. **Add UI and API regression tests.** Exercise empty, pending/in-progress, published/healthy, rejected/failed, and mixed datasets. Use a fake GitHub publisher to verify exact write counts and failure behavior. Parse returned HTML and assert meaningful content/classes/links rather than relying on screenshots alone.
+8. **Update operator documentation and verify.** Document startup and UI/API use, explicitly naming `GITHUB_TOKEN`, `GITHUB_OWNER`, and `GITHUB_REPO`. Run the complete offline test suite and manually inspect representative pages at desktop and narrow widths with JavaScript disabled.
 
 ## Acceptance criteria
 
-### C1 — fail-loud repository connection
+### Review list and timeline
 
-- Startup refuses missing owner/repo/token before an HTTP call and refuses to serve on failed GitHub validation.
-- A valid repository check succeeds; 401 says `authentication failed`; 404 says the named repository is `not found or not readable`; rate-limited 403 includes the actual reset time; other 403 responses preserve GitHub's safe error message; transport failures become clear service errors without raw stack traces.
-- Every request carries bearer authorization, GitHub JSON Accept, and a pinned API version, while tests/audit/log output never reveal the token.
+- The primary HTML review page returns 200 with zero packs and presents a useful empty state.
+- With packs present, every durable pack appears exactly once in both the main card collection and timeline, ordered newest creation timestamp first.
+- The timeline is vertical, uses connected dots, and provides readable status text; meaning is not conveyed by color alone.
+- An explicitly current canonical pack is selected when such data exists; otherwise the newest pack is highlighted. Selection remains understandable without JavaScript.
+- Every card shows version, canonical status pill, timestamped pack-specific audit activity, and a working link to the full review page.
+- Published cards alone show correct commit, pull-request, and changelog-line metric tiles. Metric values are prominent and labels are small/muted.
 
-### C2 — complete, read-only stored scan
+### Full pack review
 
-- Latest published release time is the cutoff; prereleases/drafts are not baselines. A latest-release 404 is explicit no-prior-release and uses repository creation time to return an inspectable first-release history.
-- All post-cutoff default-branch commits and merged PRs are fetched across pages and display identifier, verbatim title, author, commit/merge date, and GitHub URL; PR labels are retained for downstream rules.
-- The scan and exact evidence lists/cutoff/capture time survive restart, drafting does not re-scan, and the fake's recorded calls prove no create/update/delete GitHub method ran.
+- A valid detail URL displays canonical version/status and the complete changelog, release notes, announcement text, and rationale where available, without silently modifying stored content.
+- Supporting commits and pull requests come from the pack's stored scan and include safe, clickable GitHub URLs plus identifying text.
+- Pending and active in-progress review states expose both approve and reject forms. Terminal published, rejected, failed/conflict, or uncertain states do not offer an invalid fresh decision; their status and audit outcome remain visible.
+- Both forms contain labeled actor and reason inputs, and reason is required by HTML and independently enforced server-side after whitespace trimming.
+- Unknown pack IDs return HTTP 404 rather than an empty or misleading success page.
 
-### C3 — evidence-backed worthiness
+### Decisions, publication, and errors
 
-- Breaking, feature, and fix signals produce a worthy verdict with cited evidence and a short deterministic explanation.
-- Empty, docs-only, and unknown-only snapshots produce a complete non-worthy verdict with the available evidence/reason and no pack row.
-- No verdict can be persisted with evidence IDs outside its scan.
+- Blank or whitespace-only approval and rejection reasons are rejected through HTML, JSON API, and direct store/workflow paths, with no status transition or GitHub write.
+- A valid rejection records the actor and reason, changes the durable pack status to rejected, adds a timestamped audit event, remains visible after database reopen, and never calls GitHub publication.
+- A valid approval records actor/reason and immediately makes exactly one publication attempt using the existing publication phase. On success, the durable status is published, the release receipt appears in audit activity, and HTML redirects to the updated detail.
+- A GitHub/API publication exception produces a non-success HTTP response and visible error, while the durable pack status/attempt/audit reflect the canonical uncertain or failed outcome. No page or API payload reports publication success or published status unless the store recorded it.
+- Invalid/repeated/concurrent decisions continue to be rejected by canonical compare-and-set guards. The existing explicit publish/reconcile APIs remain available for CLI/cron compatibility and recovery but cannot bypass legal status transitions.
 
-### C4 — complete traceable pack
+### Styling, accessibility, and progressive enhancement
 
-- A worthy scan creates a proposed semver/tag, grouped features/fixes/other changelog, GitHub-renderable Markdown notes, short plain Markdown announcement, version rationale, and supporting URLs.
-- Every changelog line and bump reason has a persisted foreign-key reference to scanned evidence; tests check all lines (not only three samples).
-- Pack generation consumes the immutable stored scan, prefers PRs as specified, and makes no network or announcement-posting call.
+- Pages work end to end with JavaScript disabled: list/detail navigation, reason entry, approve/reject submission, errors, and success navigation.
+- Layout uses a white background, sans-serif type, whitespace, 1px borders, and no shadows. Amber/orange is limited to pending/in-progress, green to published/healthy, red to rejected/failed, and blue to links.
+- Forms have explicit labels, controls are keyboard reachable, focus is visible, headings/landmarks are ordered meaningfully, and status/error text is announced/readable without color.
+- At narrow viewport widths the timeline and cards remain readable without horizontal page scrolling or overlapping controls.
+- All assets are local and directly served by FastAPI; there is no frontend framework, SPA runtime, Node dependency, CDN requirement, or asset compilation step.
 
-### C5 and C12 — mandatory human review with no bypass
+### Compatibility, security scope, and operations
 
-- Pending and rejected packs cannot publish. A rejection stores nonblank rejecter/reason/time and leaves the pack and evidence visible.
-- Approval requires a nonblank human-supplied identifier and is the only transition to publishable state. There is no auto-approval/tier/config/request field, and every UI/API/script publish path converges on the same approval guard.
-- Repeated or competing decisions cannot overwrite the first terminal decision.
-
-### C6 — real GitHub publication and receipt
-
-- Publication sends the immutable approved tag, title, and notes body through the sole GitHub write method; announcement text is excluded.
-- Successful publication records the GitHub URL/time, exact published values (and body digest/full approved body), attempt result, and approving decision/actor.
-- The opt-in real-repository test verifies the created release via GitHub and is run only by an operator with a designated repository/token.
-
-### C7 — interruption-safe recovery
-
-- An attempt exists durably before the API call. Lost responses and process death leave an uncertain/recoverable record rather than being treated as absent.
-- Recovery checks GitHub by tag before either resolution or retry. Existing matching releases become resolved success without another create call; absent releases become retry-safe; conflicts block publication.
-- Retry requires a recorded absent reconciliation and creates one new attempt. Repeated reconciliation/mark-resolved requests are idempotent and no state can double-publish.
-
-### C8 — separate queryable audit trail
-
-- The deployed API/UI can query chronological scans, verdicts, packs, human decisions, attempts, reconciliation, and receipts, including actor/reason/result/version/URL/times as applicable.
-- Rejections, failures, and uncertain attempts are retained. Audit entries are product records in Release Manager SQLite, not inferred from logs and not conflated with Shipyard's build trace.
-
-### C9 — genuine Shipyard evidence
-
-- The runtime phase graph is registered as scan, draft, review, publish, rollback with visible gates/holds.
-- The repository/run documentation points to the actual `.shipyard/trace.db`, `shipyard runs`, or yard view containing request/plan/build/verify/review/accept, retries/gates, and the criteria scorecard. No test fixture or synthetic Release Manager record is presented as this evidence.
-
-### C10 — offline core coverage
-
-- Default `pytest -q` requires no network/token and covers worthy and non-worthy decisions, major/minor/patch derivation, approval and rejection, blocked unapproved publication, exact publish payload, and both recovery outcomes through the raw HTTP seam.
-- Tests also cover pagination, first-release behavior, persistence across reopen, invalid transitions, and evidence referential integrity.
-
-### C11 — reproducible setup/deployment
-
-- From a fresh clone, `./init.sh` installs all declared dependencies and the offline suite is green with no seed database/manual migration.
-- With only documented owner/repo/token (and optional DB path), uvicorn initializes SQLite, validates GitHub, and serves `/health`; the container follows the same contract and does not contain credentials.
-
-### C13 and v1 scope guardrails
-
-- Announcement output is text for copy/paste only. There is no Slack, Discord, webhook, or generic send route/client and publication never accesses such a service.
-- One environment-configured repository and GitHub Releases are the only supported repository/target. No credentials are persisted or accepted over API, and rejected/failed evidence is never deleted.
-
-## Final verification checklist
-
-- `criteria.json` differs only in justified `passes` values.
-- Default tests are deterministic, offline, and green after clean initialization.
-- Startup validation and all GitHub error mappings are exercised using raw fake responses.
-- Stored scans and packs remain identical after GitHub fake data changes, proving snapshot behavior.
-- Audit queries show both success and rejection/failure histories after restart.
-- Source review finds only one GitHub create-release call site, guarded by approval, and no announcement sender or auto-approval path.
-- Interrupted publication is reconciled in both exists/absent cases without duplicate create calls.
-- A real acceptance release is verified when credentials are supplied, and its receipt matches the pack.
-- Release Manager audit evidence and genuine Shipyard build/runtime trace evidence are both independently inspectable.
+- Existing health, scan, pack, publish/reconcile, and audit API routes continue to work for non-browser clients, with decision request changes limited to the specified required reason and immediate approval publication behavior.
+- UI routes do not accept or expose repository credentials. No authentication/authorization behavior is implied or added; documentation clearly says anyone with network access may view and act for now.
+- Operator documentation explicitly names and explains `GITHUB_TOKEN`, `GITHUB_OWNER`, and `GITHUB_REPO`, and describes publication failure/reconciliation without suggesting a failed action succeeded.
+- The complete default `pytest` suite is offline and passes using temporary SQLite databases and fake GitHub clients, including representative pending, published, rejected, failed/uncertain, and empty UI states.
