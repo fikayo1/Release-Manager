@@ -2,159 +2,85 @@
   "criteria": [
     {
       "id": "C1",
-      "description": "Connecting a repository fails loud on a bad token or an unreadable repo, never silently",
+      "description": "The server-rendered review dashboard presents every release pack in the requested timeline-and-cards layout.",
       "verification": [
-        "Configure with a repo the token cannot read (or an invalid token) \u2192 expect a clear, immediate error naming the repo/token problem, not a silent empty scan or a 200",
-        "Configure with a valid token and a real, readable repo \u2192 expect the connection to succeed"
+        "Start Release Manager and open the review interface in a browser.",
+        "Confirm every pack returned by the existing pack-list API appears once in the left timeline and once as a main-panel card, ordered newest first.",
+        "Confirm timeline dots are connected by a rail and the current pack, or newest pack when none is current, is visibly highlighted.",
+        "Confirm each card displays its version, status pill, and timestamped audit events."
       ],
-      "passes": true,
-      "priority": 1,
-      "evidence": "Started uvicorn with an invalid token and unreadable repository; startup exited with code 3 and a clear `src.github_client.GitHubError: authentication failed` rather than serving HTTP 200. Operator-verified 2026-08-24 with real credentials: GITHUB_OWNER/GITHUB_REPO/GITHUB_TOKEN exported for the real repository fikayo1/Tello-Drone-controller and a valid token, `.venv/bin/uvicorn src.app:app` started cleanly and GET /health returned {\"status\":\"ok\"} — confirming the documented authenticated startup check succeeds against a real, readable repository. Both halves of this criterion are now demonstrated."
+      "passes": false,
+      "priority": 1
     },
     {
       "id": "C2",
-      "description": "Scan lists every commit/PR since the last release, or correctly reports there is none",
+      "description": "A reviewer can open a pack and inspect all release content and supporting links.",
       "verification": [
-        "Against a repo with a prior GitHub release, run a scan \u2192 expect a list of commits/PRs merged after that release's date, each with sha/PR number, title, author, date, and a link back to GitHub",
-        "Against a repo with no prior release, run a scan \u2192 expect an explicit 'no prior release' result, not an empty list presented as 'nothing changed'",
-        "Scan makes no write calls to the GitHub API \u2014 confirm by checking the target repo is unmodified after a scan"
+        "From the dashboard, open a pack's full review page.",
+        "Confirm the page shows version, changelog, release notes, announcement, and all supporting commit and pull-request links supplied by the API.",
+        "Activate one commit link and one pull-request link and confirm each resolves to its intended external URL."
       ],
-      "passes": true,
-      "priority": 1,
-      "evidence": "POST /api/scans with an injected fake GitHub client returned 201 and listed three PRs with IDs, titles, authors, dates, SHAs, and GitHub links. A separate no-release scan returned `no_prior_release: true`, and the fake recorded zero writes. Operator-verified 2026-08-24 with real credentials: POST /api/scans against the real repository fikayo1/Tello-Drone-controller returned two real commits (sha, title, author, date, GitHub link) and correctly reported `no_prior_release: true` for a repository with no GitHub Release. No commit/PR state changed on the repository as a result — the only write the whole session performed was the later, separate, explicit publish call."
+      "passes": false,
+      "priority": 1
     },
     {
       "id": "C3",
-      "description": "Release-worthiness is decided with visible evidence, including a valid 'not release-worthy' outcome",
+      "description": "Anyone with network access can approve a pending or in-progress pack with a reason, triggering publication.",
       "verification": [
-        "Scan a change set that includes at least one feature or fix PR \u2192 expect a release-worthy verdict citing the specific commits/PRs behind it",
-        "Scan a change set that is docs-only or empty \u2192 expect a not-release-worthy verdict, also citing evidence, and the run stops there without drafting a pack",
-        "Every verdict names which commits/PRs it is based on \u2014 a bare true/false with no evidence fails this criterion"
+        "Without signing in, open a pending or in-progress pack and attempt approval with an empty or whitespace-only reason; confirm submission is blocked or rejected with a visible validation message.",
+        "Submit approval with a non-blank reason and confirm the publication workflow is triggered.",
+        "After publication completes, reload the page and query the same pack through the existing API; confirm its canonical status is published and its audit timeline contains the approval reason, publication outcome, and timestamps.",
+        "If publication fails, confirm a visible failure is shown and the pack is not falsely displayed as published."
       ],
-      "passes": true,
-      "priority": 1,
-      "evidence": "Exercised POST /api/scans with distinct injected inputs. Feature/fix PRs produced `worthy: true`, a minor verdict, and evidence IDs PR-1, PR-2, PR-3. A docs-only scan produced `worthy: false`, reason `Changes are documentation-only.`, evidence ID PR-1, and `pack: null`, demonstrating drafting stopped."
+      "passes": false,
+      "priority": 1
     },
     {
       "id": "C4",
-      "description": "A release-worthy scan produces a complete release pack, every claim traceable to a scanned commit or PR",
+      "description": "Anyone with network access can reject a pending or in-progress pack with a reason.",
       "verification": [
-        "Generate a pack from a release-worthy scan \u2192 expect a proposed semver version, a changelog grouped by kind, GitHub-formatted release notes, a short announcement draft, and the supporting commit/PR links",
-        "Every changelog line and the version bump reason must reference a specific commit/PR from the scan \u2014 spot-check at least 3 lines against the scan's own commit list",
-        "The announcement draft is plain text/markdown suitable for a human to paste \u2014 not itself posted anywhere by this step"
+        "Without signing in, open a pending or in-progress pack and attempt rejection with an empty or whitespace-only reason; confirm submission is blocked or rejected with a visible validation message.",
+        "Submit rejection with a non-blank reason, reload the page, and confirm the pack is visibly rejected.",
+        "Query the same pack through the existing API and confirm its status is rejected and its audit timeline contains the rejection, reason, and timestamp."
       ],
-      "passes": true,
-      "priority": 1,
-      "evidence": "The release-worthy API scan produced version 1.3.0/tag v1.3.0, Features and Fixes changelog sections, GitHub-formatted Markdown release notes, a plain-text announcement, rationale, and supporting links. Spot-checked all three lines: feat alpha\u2192PR-1, fix beta\u2192PR-2, feat gamma\u2192PR-3; each matched the scan and each rationale claim carried the corresponding evidence_id. The scan caused no fake GitHub writes."
+      "passes": false,
+      "priority": 1
     },
     {
       "id": "C5",
-      "description": "A release pack cannot publish without human approval, and rejection is recorded and retained",
+      "description": "Published packs show the requested release metrics while non-published packs do not present them as published results.",
       "verification": [
-        "Attempt to publish a pending pack with no approval recorded \u2192 expect the publish to be refused",
-        "Reject a pending pack with a reason \u2192 expect the pack's status to change to rejected, the reason stored, and the pack still present in the audit trail (not deleted)",
-        "Search the codebase for any code path that can reach publish without an approval check \u2014 none should exist at any autonomy tier"
+        "View a published pack card and confirm it contains metric tiles for commit count, pull-request count, and changelog line count.",
+        "Confirm each tile uses a large bold numeric value with a smaller muted label.",
+        "Compare the displayed values with the pack data returned by the API.",
+        "View a non-published pack and confirm it does not display those metrics as published results."
       ],
-      "passes": true,
-      "priority": 1,
-      "evidence": "Attempting POST /api/packs/{id}/publish while pending returned 409. Rejecting with actor `bob` and reason `needs work` returned 200; GET /api/packs/{id} then showed `status: rejected`, and GET /api/audit retained a decision event with actor and reason. Code search found the publish phase always calls Store.claim_publish, whose compare-and-set permits only approved or reconciliation-authorized retry_safe packs."
+      "passes": false,
+      "priority": 2
     },
     {
       "id": "C6",
-      "description": "Approving a pack and publishing it creates a real GitHub Release and records a receipt",
+      "description": "The interface follows the specified minimalist, semantic-status visual design.",
       "verification": [
-        "Approve a pending pack, recording an approver identifier \u2192 expect the pack's status to change to approved",
-        "Publish the approved pack against a real test repository with a real token \u2192 expect a GitHub Release to actually exist afterward (verify via the GitHub API or web UI, tag and body matching the pack)",
-        "Expect a receipt recorded with what was published, the resulting release URL, when, and who approved it",
-        "Requires a real GITHUB_TOKEN and a designated test repository \u2014 this step is exercised by an operator with real credentials, not simulated"
+        "Inspect the dashboard and full pack page at a desktop viewport.",
+        "Confirm a white background, sans-serif type, generous spacing, 1px card or section borders, and no card shadows.",
+        "Confirm pending or in-progress indicators are amber/orange, published or healthy indicators green, rejected or failed indicators red, and links blue.",
+        "Confirm decorative colors are not used for unrelated content."
       ],
-      "passes": true,
-      "priority": 1,
-      "evidence": "With an injected fake client, approval changed status to approved, publish returned matching tag/title/body, and /api/audit recorded approver `operator-42`, version, URL, body, timestamp, and success. Operator-verified 2026-08-24 with real credentials: approved pack b5ef2335 as actor 'fikayo', published it, and independently confirmed via a direct call to https://api.github.com/repos/fikayo1/Tello-Drone-controller/releases/tags/0.0.1 (outside the service) that a real GitHub Release exists — id 375645633, tag_name 0.0.1, body matching the pack exactly. GET /api/audit recorded the receipt: publish_success, approver 'fikayo', version 0.0.1, release URL, and timestamp."
+      "passes": false,
+      "priority": 2
     },
     {
       "id": "C7",
-      "description": "A failed or interrupted publish recovers without ever double-publishing",
+      "description": "The review flow remains usable as server-rendered FastAPI HTML and the product passes its required verification.",
       "verification": [
-        "Simulate an interrupted publish (kill the process, or inject a failure, after the GitHub API call is sent but before the result is recorded)",
-        "On recovery, expect the service to check GitHub for whether the release actually exists rather than assuming either outcome",
-        "If the release exists: expect recovery to record the true outcome and refuse to publish it again",
-        "If the release does not exist: expect recovery to allow a fresh publish attempt, and that attempt must succeed",
-        "A recovery path that blindly retries without checking GitHub first fails this criterion even if it happens not to double-publish in one test run"
+        "Disable JavaScript in the browser, reload the review interface, and confirm packs can still be listed, opened, approved, and rejected through normal navigation and form submission.",
+        "Inspect browser network activity and confirm the initial review pages are HTML responses rather than a client-rendered SPA shell, with no frontend-framework runtime required.",
+        "Confirm operator documentation names GITHUB_TOKEN, GITHUB_OWNER, and GITHUB_REPO.",
+        "Run `.venv/bin/python -m pytest -q` from the repository root and confirm it exits successfully."
       ],
-      "passes": true,
-      "priority": 1,
-      "evidence": "The recovery test simulated termination after publication and before recording; reconciliation looked up the tag, recognized a matching release, finalized the attempt as success, marked the pack published, and prevented another publish. I also exercised the absent path directly: reconciliation performed one GitHub lookup, moved the pack to retry_safe, and a fresh publish succeeded exactly once. The recovery implementation always calls release_for_tag before choosing matching, absent, or conflict."
-    },
-    {
-      "id": "C8",
-      "description": "Release Manager's own audit trail records who approved or rejected, what was published, and the result",
-      "verification": [
-        "After an approve \u2192 publish cycle, query the audit trail \u2192 expect an entry with the approver, the timestamp, the pack version, and the publish result (success + release URL, or failure + reason)",
-        "After a reject, expect an entry with the rejecter and the stated reason",
-        "The audit trail is queryable from the deployed service (not only inferable from server logs)"
-      ],
-      "passes": true,
-      "priority": 2,
-      "evidence": "GET /api/audit was exercised after approve\u2192publish and returned queryable decision, publish_started, and publish_success entries containing approver `operator-42`, timestamps, version 1.0.1, success result, release URL, tag, title, and body. A separate rejection returned an audit decision containing rejecter `bob` and reason `needs work`."
-    },
-    {
-      "id": "C9",
-      "description": "The Shipyard execution trace of the run(s) that built and operate this service is inspectable",
-      "verification": [
-        "Query `.shipyard/trace.db` (or `shipyard runs` / the yard view) for the run(s) that built this service \u2192 expect a real phase graph (request/plan/build/verify/review/accept), gate results, and an acceptance scorecard against this criteria.json",
-        "This is the evidence the trial brief asks for specifically: that Release Manager was built through Shipyard rather than as a separate manual implementation"
-      ],
-      "passes": true,
-      "priority": 1,
-      "evidence": "No `.shipyard/trace.db` exists INSIDE the bay the acceptor ran in — expected, since the trace lives outside every bay by design (src/workflow.py correctly declares only local phase callbacks rather than fabricating one). Verified 2026-08-24 by querying the operator's real `.shipyard/trace.db` directly: run 919566e3 (topology release-manager) shows a genuine phase graph — request, plan, build, verify, review, accept, and a second build phase — with real tool-call events (Write src/github_client.py, Write src/OPERATIONS.md, Bash .venv/bin/python -m pytest -q, git diff/status) and envelope_parsed summaries. This captures an actual correction cycle: the first accept phase's failing verdict sent the run back to build, which hardened GitHub error handling and secret redaction exactly as delivered — genuine 'built through Shipyard' evidence, including the correction mechanism, not a separate manual implementation. Caveat: read from a trace.db snapshot missing its -wal file (a transfer timeout mid-session), so the final phase's completion and the run's terminal status were not visible in this pass — confirm the fully current picture with `shipyard runs 919566e3` or the yard view directly."
-    },
-    {
-      "id": "C10",
-      "description": "Automated tests cover the core release-worthiness, versioning, and approval/rejection logic",
-      "verification": [
-        "`.venv/bin/python -m pytest -q` passes",
-        "At least one test drives a release-worthy verdict and at least one drives a not-release-worthy verdict from distinct scanned inputs",
-        "At least one test drives an approval and at least one a rejection, asserting the resulting status and that publish is blocked pre-approval",
-        "These tests must not require network access or a real GitHub token \u2014 the GitHub client is a seam a test can fake, the same pattern the adapters in shipyard/adapters/ already use"
-      ],
-      "passes": true,
-      "priority": 1,
-      "evidence": "Ran `.venv/bin/python -m pytest -q`: 12 tests passed in 0.57s with one deprecation warning. test_core.py covers release-worthy and docs-only non-worthy inputs plus major/minor/patch semver. test_governance.py covers approval, rejection, retained status, and pre-approval publish blocking. Tests use injected/fake clients and temporary SQLite with no network token."
-    },
-    {
-      "id": "C11",
-      "description": "Setup is reproducible in a clean environment with no undocumented steps",
-      "verification": [
-        "From a fresh clone, `./init.sh` completes with no manual intervention beyond exporting a GitHub token",
-        "`.venv/bin/python -m pytest -q` is green immediately after init.sh, with no seed data or manual DB setup required",
-        "`.venv/bin/uvicorn src.app:app` starts and serves `/health` with no additional configuration beyond the documented environment variables"
-      ],
-      "passes": true,
-      "priority": 2,
-      "evidence": "The build-time environment ran all 12 tests successfully with no network/token required. Operator-verified 2026-08-24: ran `./init.sh` then `.venv/bin/uvicorn src.app:app` with only the three documented environment variables (GITHUB_OWNER, GITHUB_REPO, GITHUB_TOKEN) exported — it started cleanly and served a real authenticated GET /health as {\"status\":\"ok\"}, with no undocumented steps or manual DB setup. All three verification steps are now demonstrated."
-    },
-    {
-      "id": "C12",
-      "description": "No autonomy tier or configuration path can auto-approve a release",
-      "verification": [
-        "Unlike ordinary Shipyard builds (which can auto-land safe changes at AutonomyTier.LAND_SAFE), inspect every publish-reachable code path and confirm none skips the human-approval check regardless of any tier/config flag",
-        "This is a named v1 guardrail, not an oversight \u2014 a release auto-publishing without a human looking at the pack is the one mistake this whole product exists to prevent"
-      ],
-      "passes": true,
-      "priority": 1,
-      "evidence": "Searched all src code for autonomy, auto-approval, publish, and create_release paths. No autonomy/config auto-approval path exists. The explicit approve endpoint requires an actor; publish always enters Store.claim_publish, which only transitions from approved or retry_safe, and retry_safe is reachable only after GitHub reconciliation reports the release absent."
-    },
-    {
-      "id": "C13",
-      "description": "The announcement draft is never posted automatically anywhere",
-      "verification": [
-        "Inspect the codebase for any Slack/Discord/webhook posting code \u2014 none should exist reachable from the publish or draft phases",
-        "The announcement field in the release pack is returned as plain text/markdown for a human to copy, with no 'send' action anywhere in the API"
-      ],
-      "passes": true,
-      "priority": 2,
-      "evidence": "Code search found no Slack, Discord, webhook, or generic send/posting integration. The generated pack returned `announcement` as plain text, while the only publish write calls GitHub create_release with tag, title, and body\u2014not announcement. The API exposes no announcement send action."
+      "passes": false,
+      "priority": 1
     }
   ],
   "note": "The definition of done. Later phases may ONLY flip `passes`. Editing or removing a criterion is a gate failure."
