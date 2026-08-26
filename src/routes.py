@@ -131,6 +131,18 @@ def start(request: Request):
     return {"scan": primitive(snapshot), "verdict": primitive(verdict), "pack": primitive(pack) if pack else None}
 
 
+@router.get("/api/packs")
+def list_packs(request: Request):
+    """Return the complete pack collection in dashboard display order.
+
+    The review page and this endpoint intentionally share the same view
+    builder so operators and API consumers see a one-to-one collection with
+    identical status, activity, and published metrics.
+    """
+    store, _ = deps(request)
+    return [_pack_view(store, pack) for pack in store.packs()]
+
+
 @router.get("/api/packs/{pack_id}")
 def get_pack(pack_id: str, request: Request):
     try:
