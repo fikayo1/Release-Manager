@@ -9,7 +9,7 @@
         "Confirm timeline dots are connected by a rail and the current pack, or newest pack when none is current, is visibly highlighted.",
         "Confirm each card displays its version, status pill, and timestamped audit events."
       ],
-      "passes": false,
+      "passes": true,
       "priority": 1
     },
     {
@@ -20,7 +20,7 @@
         "Confirm the page shows version, changelog, release notes, announcement, and all supporting commit and pull-request links supplied by the API.",
         "Activate one commit link and one pull-request link and confirm each resolves to its intended external URL."
       ],
-      "passes": false,
+      "passes": true,
       "priority": 1
     },
     {
@@ -32,7 +32,7 @@
         "After publication completes, reload the page and query the same pack through the existing API; confirm its canonical status is published and its audit timeline contains the approval reason, publication outcome, and timestamps.",
         "If publication fails, confirm a visible failure is shown and the pack is not falsely displayed as published."
       ],
-      "passes": false,
+      "passes": true,
       "priority": 1
     },
     {
@@ -43,7 +43,7 @@
         "Submit rejection with a non-blank reason, reload the page, and confirm the pack is visibly rejected.",
         "Query the same pack through the existing API and confirm its status is rejected and its audit timeline contains the rejection, reason, and timestamp."
       ],
-      "passes": false,
+      "passes": true,
       "priority": 1
     },
     {
@@ -55,7 +55,7 @@
         "Compare the displayed values with the pack data returned by the API.",
         "View a non-published pack and confirm it does not display those metrics as published results."
       ],
-      "passes": false,
+      "passes": true,
       "priority": 2
     },
     {
@@ -67,7 +67,7 @@
         "Confirm pending or in-progress indicators are amber/orange, published or healthy indicators green, rejected or failed indicators red, and links blue.",
         "Confirm decorative colors are not used for unrelated content."
       ],
-      "passes": false,
+      "passes": true,
       "priority": 2
     },
     {
@@ -79,7 +79,7 @@
         "Confirm operator documentation names GITHUB_TOKEN, GITHUB_OWNER, and GITHUB_REPO.",
         "Run `.venv/bin/python -m pytest -q` from the repository root and confirm it exits successfully."
       ],
-      "passes": false,
+      "passes": true,
       "priority": 1
     }
   ],
