@@ -23,13 +23,24 @@ token, an unreadable repository, rate limiting, or transport failure prevents
 startup. `GET /health` returns `{"status":"ok"}` only after startup succeeds.
 Do not put the token in command-line arguments, API bodies, or the database.
 
-The JSON workflow is:
+Open `/review` for the server-rendered review queue; every pack links to
+`/review/packs/{id}` for evidence, audit history, and decision forms. There is
+currently **no authentication or authorization**: anyone who can reach the
+service over the network can view packs and submit decisions. Restrict network
+access accordingly. Both approval and rejection require a named actor and a
+non-blank reason. Approval immediately attempts GitHub publication. A failed
+request is not success: the detail page displays the durable uncertain state,
+and an operator must reconcile before retrying.
+
+The compatible JSON workflow is:
 
 1. `POST /api/scans` (read-only scan and deterministic draft when worthy).
 2. `GET /api/packs/{id}` to inspect all text and evidence references.
-3. `POST /api/packs/{id}/approve` with `{"actor":"human name"}`, or
-   `/reject` with `{"actor":"human name","reason":"..."}`.
-4. `POST /api/packs/{id}/publish` only after approval.
+3. `POST /api/packs/{id}/approve` or `/reject` with
+   `{"actor":"human name","reason":"..."}`. Approval immediately publishes;
+   rejection never does.
+4. The explicit `POST /api/packs/{id}/publish` remains for compatible recovery
+   clients, but canonical state guards prevent duplicate publication.
 5. If publication is uncertain, `POST /api/packs/{id}/reconcile`. An absent
    release makes one retry safe; a matching release records success without a
    duplicate; a conflict requires human investigation.

@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}{{ pack.title }} · Release Manager{% endblock %}
+{% block content %}
+<a class="back" href="{{ url_for('review_list') }}">← All release packs</a>
+<header class="detail-heading"><div><p class="eyebrow">Release v{{ pack.version }} · {{ pack.created_at }}</p><h1>{{ pack.title }}</h1></div><span class="pill status-{{ pack.status }}">{{ pack.status|replace('_', ' ') }}</span></header>
+<div class="detail-grid">
+<section>
+  <article class="content-block"><h2>Changelog and release notes</h2><pre>{{ pack.body }}</pre></article>
+  <article class="content-block"><h2>Announcement</h2><p class="preserve">{{ pack.announcement }}</p></article>
+  <article class="content-block"><h2>Version rationale</h2><p class="preserve">{{ pack.rationale }}</p></article>
+  <article class="content-block"><h2>Supporting evidence</h2>
+    {% set items = evidence.get('pulls', []) + evidence.get('commits', []) %}
+    {% if items %}<ul class="evidence">{% for item in items %}<li><a href="{{ item.url }}" rel="noopener noreferrer">{{ item.id }} — {{ item.title }}</a><small>{{ item.kind }} by {{ item.author }} · {{ item.occurred_at }}</small></li>{% endfor %}</ul>{% else %}<p class="muted">No stored commit or pull-request evidence is available.</p>{% endif %}
+  </article>
+</section>
+<aside>
+  {% if pack.status == 'pending' %}
+  <section class="actions"><h2>Decision</h2><p>Both decisions are terminal. Approval immediately publishes this release to GitHub.</p>
+    <form method="post" action="{{ url_for('review_decision', pack_id=pack.id, decision='approve') }}">
+      <h3>Approve and publish</h3><label for="approve-actor">Your name</label><input id="approve-actor" name="actor" value="{{ values.get('actor', '') }}" required>
+      <label for="approve-reason">Reason</label><textarea id="approve-reason" name="reason" required>{{ values.get('reason', '') }}</textarea><button class="approve" type="submit">Approve and publish</button>
+    </form>
+    <form method="post" action="{{ url_for('review_decision', pack_id=pack.id, decision='reject') }}">
+      <h3>Reject release</h3><label for="reject-actor">Your name</label><input id="reject-actor" name="actor" value="{{ values.get('actor', '') }}" required>
+      <label for="reject-reason">Reason</label><textarea id="reject-reason" name="reason" required>{{ values.get('reason', '') }}</textarea><button class="reject" type="submit">Reject release</button>
+    </form>
+  </section>
+  {% else %}<section class="outcome"><h2>Review outcome</h2><p>This pack is <strong>{{ pack.status|replace('_', ' ') }}</strong>. A new decision is not available.</p></section>{% endif %}
+  <section class="history"><h2>Audit history</h2>{% if activity %}<ol>{% for event in activity %}<li><strong>{{ event.kind|replace('_', ' ') }}</strong><time>{{ event.created_at }}</time>{% if event.actor %}<span>Actor: {{ event.actor }}</span>{% endif %}{% if event.detail.reason %}<p>{{ event.detail.reason }}</p>{% endif %}{% if event.detail.url %}<a href="{{ event.detail.url }}">Publication receipt</a>{% endif %}</li>{% endfor %}</ol>{% else %}<p class="muted">No activity recorded.</p>{% endif %}</section>
+</aside>
+</div>
+{% endblock %}

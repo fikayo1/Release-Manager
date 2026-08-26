@@ -65,12 +65,34 @@ class Store:
                 raise KeyError(pid)
             return {**json.loads(row["data"]), "status": row["status"]}
 
+    def packs(self):
+        """Return every pack newest first, with a stable id tie-break."""
+        with self.connect() as db:
+            rows = db.execute("SELECT * FROM packs ORDER BY created_at DESC, id DESC").fetchall()
+            return [
+                {**json.loads(row["data"]), "status": row["status"], "created_at": row["created_at"]}
+                for row in rows
+            ]
+
+    def scan(self, scan_id):
+        with self.connect() as db:
+            row = db.execute("SELECT data,created_at FROM scans WHERE id=?", (scan_id,)).fetchone()
+            if not row:
+                raise KeyError(scan_id)
+            return {**json.loads(row["data"]), "created_at": row["created_at"]}
+
+    def pack_audit(self, pid):
+        """Return chronological activity directly concerning a pack."""
+        return [record for record in self.audit() if record["subject_id"] == pid]
+
     def decide(self, pid, decision, actor, reason, now):
-        actor = actor.strip()
+        actor = (actor or "").strip()
         reason = (reason or "").strip()
-        if not actor or (decision == "rejected" and not reason):
-            raise StateError("actor and rejection reason are required")
-        target = "approved" if decision == "approved" else "rejected"
+        if decision not in {"approved", "rejected"}:
+            raise StateError("decision must be approved or rejected")
+        if not actor or not reason:
+            raise StateError("actor and reason are required")
+        target = decision
         with self.connect() as db:
             if db.execute(
                 "UPDATE packs SET status=? WHERE id=? AND status='pending'", (target, pid)

@@ -1,6 +1,8 @@
 """Release Manager application factory."""
 from contextlib import asynccontextmanager
+from pathlib import Path
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from .config import Settings
 from .github_client import GitHubClient
 from .routes import router
@@ -17,6 +19,7 @@ def create_app(settings:Settings|None=None, github=None, validate:bool=True) -> 
             app.state.github.repository()  # fail loud before serving
         yield
     application=FastAPI(title="release-manager",lifespan=lifespan)
+    application.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
     application.include_router(router)
     @application.get("/health")
     def health(): return {"status":"ok"}

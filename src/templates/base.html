@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Release Manager{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='/review.css') }}">
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="{{ url_for('review_list') }}">Release Manager</a>
+  <span class="access-note">Network access permits review actions; authentication is not yet enabled.</span>
+</header>
+<main class="page">
+  {% if error %}<div class="error" role="alert"><strong>Action not completed.</strong> {{ error }}</div>{% endif %}
+  {% block content %}{% endblock %}
+</main>
+</body>
+</html>

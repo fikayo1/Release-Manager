@@ -14,7 +14,7 @@ def approved_store(tmp_path):
         "minor", (Claim("Features", "feature", "e"),),
     )
     store.save_pack(pack, "t0")
-    store.decide("p", "approved", "alice", None, "t1")
+    store.decide("p", "approved", "alice", "reviewed and ready", "t1")
     return store
 
 

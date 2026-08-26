@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Release reviews · Release Manager{% endblock %}
+{% block content %}
+<header class="page-heading">
+  <div><p class="eyebrow">Repository releases</p><h1>Review queue</h1></div>
+  <p>Inspect durable release packs and their publication status.</p>
+</header>
+{% if packs %}
+<div class="review-layout">
+  <nav class="timeline" aria-label="Release pack timeline">
+    <h2>Timeline</h2>
+    <ol>
+    {% for pack in packs %}
+      <li class="status-{{ pack.status }} {% if pack.id == selected_id %}selected{% endif %}">
+        <a href="{{ url_for('review_list') }}?selected={{ pack.id }}"><strong>v{{ pack.version }}</strong><span>{{ pack.status|replace('_', ' ') }}</span></a>
+      </li>
+    {% endfor %}
+    </ol>
+  </nav>
+  <section class="cards" aria-label="Release packs">
+  {% for pack in packs %}
+    <article class="pack-card {% if pack.id == selected_id %}selected-card{% endif %}" id="pack-{{ pack.id }}">
+      <header><div><p class="eyebrow">{{ pack.created_at }}</p><h2>{{ pack.title }}</h2></div><span class="pill status-{{ pack.status }}">{{ pack.status|replace('_', ' ') }}</span></header>
+      <p>{{ pack.rationale }}</p>
+      {% if pack.metrics %}<dl class="metrics">{% for label, value in pack.metrics.items() %}<div><dd>{{ value }}</dd><dt>{{ label }}</dt></div>{% endfor %}</dl>{% endif %}
+      <h3>Activity</h3>
+      {% if pack.activity %}<ul class="activity">{% for event in pack.activity %}<li><time>{{ event.created_at }}</time> {{ event.kind|replace('_', ' ') }}{% if event.actor %} by {{ event.actor }}{% endif %}</li>{% endfor %}</ul>{% else %}<p class="muted">No activity recorded.</p>{% endif %}
+      <a class="detail-link" href="{{ url_for('review_detail', pack_id=pack.id) }}">Review full release pack <span aria-hidden="true">→</span></a>
+    </article>
+  {% endfor %}
+  </section>
+</div>
+{% else %}
+<section class="empty"><h2>No release packs yet</h2><p>Run a scan to create a pack when repository changes are release-worthy.</p></section>
+{% endif %}
+{% endblock %}
