@@ -56,7 +56,7 @@ def _pack_view(store, pack):
         view["metrics"] = {
             "commits": len(snapshot.get("commits", [])),
             "pull requests": len(snapshot.get("pulls", [])),
-            "changelog items": sum(1 for line in pack.get("body", "").splitlines() if line.strip().startswith("-")),
+            "changelog lines": len(pack.get("body", "").splitlines()),
         }
     return view
 

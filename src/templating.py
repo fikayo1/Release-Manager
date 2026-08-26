@@ -97,7 +97,7 @@ def pack_detail(context) -> str:
         evidence_html = f'<ul class="evidence">{rows}</ul>'
     else:
         evidence_html = '<p class="muted">No stored commit or pull-request evidence is available.</p>'
-    if status == "pending":
+    if status in {"pending", "approved"}:
         values = context.get("values") or {}
         actor, reason = _e(values.get("actor", "")), _e(values.get("reason", ""))
         actions = f'''<section class="actions"><h2>Decision</h2><p>Both decisions are terminal. Approval immediately publishes this release to GitHub.</p>

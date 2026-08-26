@@ -94,10 +94,19 @@ class Store:
             raise StateError("actor and reason are required")
         target = decision
         with self.connect() as db:
+            # An ``approved`` row without a decision is an in-progress pack
+            # (for example, one imported from an older canonical snapshot),
+            # not a completed human decision. Permit it to enter governance,
+            # while the NOT EXISTS guard keeps recorded decisions terminal.
             if db.execute(
-                "UPDATE packs SET status=? WHERE id=? AND status='pending'", (target, pid)
+                """UPDATE packs SET status=?
+                   WHERE id=? AND status IN ('pending','approved')
+                     AND NOT EXISTS (
+                       SELECT 1 FROM decisions WHERE pack_id=packs.id
+                     )""",
+                (target, pid),
             ).rowcount != 1:
-                raise StateError("pack is not pending")
+                raise StateError("pack is not awaiting a decision")
             db.execute(
                 "INSERT INTO decisions(pack_id,decision,actor,reason,created_at) VALUES(?,?,?,?,?)",
                 (pid, decision, actor, reason, now),

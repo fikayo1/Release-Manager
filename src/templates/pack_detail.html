@@ -14,7 +14,7 @@
   </article>
 </section>
 <aside>
-  {% if pack.status == 'pending' %}
+  {% if pack.status in ['pending', 'approved'] %}
   <section class="actions"><h2>Decision</h2><p>Both decisions are terminal. Approval immediately publishes this release to GitHub.</p>
     <form method="post" action="{{ url_for('review_decision', pack_id=pack.id, decision='approve') }}">
       <h3>Approve and publish</h3><label for="approve-actor">Your name</label><input id="approve-actor" name="actor" value="{{ values.get('actor', '') }}" required>
