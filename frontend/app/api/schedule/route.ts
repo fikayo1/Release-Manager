@@ -1,0 +1,1 @@
+import {api} from '@/lib/api';export async function PUT(request:Request){try{return Response.json(await api('/api/schedule',{method:'PUT',body:await request.text()}))}catch(e){return Response.json({detail:'Enter a valid five-field cron expression'},{status:422})}}

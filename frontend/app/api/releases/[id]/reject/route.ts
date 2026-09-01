@@ -1,0 +1,1 @@
+import {api} from '@/lib/api';export async function POST(request:Request,{params}:{params:Promise<{id:string}>}){const {id}=await params;try{return Response.json(await api(`/api/packs/${id}/reject`,{method:'POST',body:await request.text()}))}catch{return Response.json({detail:'Rejection failed'},{status:409})}}

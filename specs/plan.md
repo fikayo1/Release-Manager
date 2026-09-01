@@ -1,91 +1,170 @@
-# Release Manager review interface plan
+# Release Manager operator dashboard implementation plan
 
-## Approach
+## Delivery approach
 
-Add a progressively enhanced, server-rendered review UI to the existing FastAPI application. The current SQLite store, pack identifiers/statuses, decision functions, publication/reconciliation behavior, JSON API, and audit records remain canonical; HTML routes will call the same workflow functions rather than implement a parallel state machine. Jinja templates and a local stylesheet are sufficient—there will be no SPA, frontend framework, or asset build.
+Extend the existing FastAPI application as the canonical workflow and persistence service, and add a separate responsive Next.js app-router UI in `frontend/`. The browser will read and mutate state only through the dashboard's same-origin server route handlers; those handlers call FastAPI with a server-only base URL. GitHub credentials remain exclusively in the FastAPI process, and no page render, route prefetch, mount, refresh, or polling path will trigger a scan. The sole browser scan entry point will be the explicit **Scan now** control.
 
-The existing `/api/...` routes remain available to CLI and cron clients. Their decision validation will be aligned with the new contract: both approval and rejection require a non-blank human reason. Approval will execute the existing approval transition and immediately invoke the existing publication phase. If GitHub publication fails, the response will be an error and the store's canonical non-success publication state/audit record will remain visible; neither JSON nor HTML will claim publication succeeded. Rejection will retain the pack and record its rejected status, actor, reason, and audit event.
+FastAPI will retain the existing scan, classification, draft, decision, publication, reconciliation, and audit functions. A new workflow runner will wrap the existing scan/draft phases for both manual and scheduled requests, add durable operation tracking, and acquire the same SQLite-backed lease regardless of trigger source. Approval will continue to record a human decision and immediately call the existing governed publication phase; rejection remains terminal. Existing explicit publication/reconciliation APIs will remain available for recovery and compatibility, subject to the existing state guards.
 
-No authentication is added. Network access is the current access boundary and the pages will state actions plainly without implying authorization that does not exist.
+One schedule row will be persisted in SQLite. Its expression has exactly five fields, all evaluation and display are UTC, and it can be enabled or disabled. A FastAPI lifespan scheduler will calculate due slots, persist scheduler heartbeat/run metadata, and resume from durable state after restart. A transactional singleton lease will prevent process-local and multi-process overlap. Every attempted run receives an operation record: a lease loser is completed as `suppressed`, while started, successful, non-release, failed, interrupted/uncertain, and recovered outcomes remain inspectable and auditable. Lease ownership has an expiry and heartbeat so a dead API process cannot lock scans forever; startup recovery will close abandoned operations truthfully and continue future due work without representing an unknown run as successful.
 
-## Files to change or create
+Schema evolution will be additive and versioned. The migration will create schedule, operation, scheduler-state, and lease structures without dropping or rewriting existing scans, verdicts, packs, decisions, attempts, reconciliations, or audit rows. Existing scans will be represented as legacy operations where needed so historical data remains visible, while retaining their original identifiers and pack relationships.
 
-### Existing files to update
+## Files to create
 
-- `requirements.txt` — add the minimal Jinja template and HTML form parsing dependencies, with no JavaScript framework or build tooling.
-- `src/app.py` — mount the local static directory, configure template-capable routing as needed, and retain the existing application factory, startup repository validation, `/health`, and dependency injection used by tests.
-- `src/routes.py` — retain all existing JSON endpoints and add HTML list/detail/decision routes. Add shared decision request validation and orchestration so approval requires a reason and triggers publication, rejection requires a reason, API errors remain truthful, HTML form failures render useful messages, and successful form posts use redirect-after-post.
-- `src/phases/review.py` — pass the required approval reason into the canonical store decision operation, keeping review transitions centralized.
-- `src/store.py` — require a non-blank reason for both decision types and add read-only queries/view support for reverse-chronological pack listing, scan evidence, and pack-scoped chronological audit activity. Existing durable transition, attempt, and audit semantics remain intact.
-- `src/OPERATIONS.md` — document the review URLs, no-auth/network-access posture, approval-publishes behavior, failure/recovery expectations, and the required `GITHUB_TOKEN`, `GITHUB_OWNER`, and `GITHUB_REPO` variables while preserving API/CLI guidance.
-- `tests/test_governance.py` — update approval tests for mandatory reasons and verify both decision types persist their reasons.
-- `tests/test_recovery_audit.py` — update fixtures/calls for reason-required approval while retaining interrupted-publication coverage.
+### Backend workflow, scheduler, and migration
 
-### New UI files
+- `src/migrations.py` — ordered, transactional SQLite migrations and schema version tracking; additive migration/backfill from the current schema with preservation checks.
+- `src/cron.py` — dependency-free validation and UTC next-run calculation for standard five-field cron expressions, including ranges, lists, wildcards, and steps with clear validation errors.
+- `src/operations.py` — the single manual/scheduled workflow runner, durable lease acquisition/renewal/release, operation state transitions, scan/verdict/pack linkage, suppression, safe error recording, and audit emission.
+- `src/scheduler.py` — lifespan-owned scheduler service, UTC clock abstraction, persisted heartbeat and due-slot handling, restart recovery, and deterministic wake/clock hooks for tests.
 
-- `src/templates/base.html` — accessible document shell, local stylesheet link, semantic status/error region, and shared page structure.
-- `src/templates/review_list.html` — primary review page with the reverse-chronological pack collection, connected vertical status timeline sidebar, selected/current fallback behavior, and a card for every pack.
-- `src/templates/pack_detail.html` — full pack review showing version, status, changelog, release notes, announcement, supporting commit/PR links, audit history, and state-appropriate approve/reject forms.
-- `src/static/review.css` — responsive minimalist styling: white background, sans-serif type, generous spacing, 1px borders, no shadows, timeline dots/connectors, large metric values with small muted labels, and semantic amber/green/red/blue color use only.
+### Backend tests and deterministic fixtures
 
-No JavaScript file is planned because all navigation, validation, submission, and feedback can work with ordinary links and forms. JavaScript should be added only if a later implementation identifies a small enhancement that leaves the complete no-JavaScript flow intact.
+- `tests/fakes.py` — reusable deterministic fake GitHub repository, evidence, release, failure, and blocking controls used without network access.
+- `tests/test_migrations.py` — pre-migration database upgrade and preservation/backfill coverage.
+- `tests/test_cron.py` — exact five-field validation and deterministic UTC matching/next-run cases.
+- `tests/test_operations.py` — shared workflow, manual/scheduled source, release and non-release outcomes, failure safety, lease suppression, and restart/expired-lease behavior.
+- `tests/test_scheduler.py` — deterministic time advancement, enabled/disabled schedules, persisted schedule state, due execution, no duplicate slot execution, health metadata, and restart recovery.
+- `tests/e2e_app.py` — test-only FastAPI assembly using a temporary durable database, fake GitHub implementation, controllable clock, held scans, publication failures, reset/seed helpers, and scheduler controls. This module is started only by Playwright and is not mounted by the production app.
 
-### New or expanded tests
+### Next.js application and configuration
 
-- `tests/test_review_ui.py` — server-rendered list/detail tests covering ordering, selection fallback, timeline/card content, semantic statuses, published metrics, evidence links, action visibility, non-JavaScript form submission, validation errors, success redirects, and truthful publication failure rendering.
-- `tests/test_routes.py` — API regression tests proving existing pack/audit routes remain usable, approve/reject both reject blank reasons, approval immediately attempts publication, rejection does not publish, and publication errors do not return success.
+- `frontend/package.json` — pinned Next.js/React runtime and unit/Playwright tooling with `test`, `test:e2e`, and `build` scripts.
+- `frontend/package-lock.json` — reproducible npm dependency resolution.
+- `frontend/next.config.mjs` — production-safe app configuration without exposing backend secrets.
+- `frontend/tsconfig.json` — strict TypeScript/app-router configuration.
+- `frontend/next-env.d.ts` — Next.js TypeScript declarations.
+- `frontend/vitest.config.ts` — jsdom/component unit-test configuration.
+- `frontend/vitest.setup.ts` — DOM matcher and test cleanup setup.
+- `frontend/playwright.config.ts` — non-skipping browser project plus deterministic FastAPI and Next web-server startup, timeouts, traces, and local runtime configuration.
+- `frontend/app/layout.tsx` — application shell, responsive navigation, title/metadata, and global status semantics.
+- `frontend/app/globals.css` — responsive layout, forms, tables/cards, timelines, status treatments, loading/error states, and accessible focus styles.
+- `frontend/app/page.tsx` — overview with repository/schedule health, recent releases and operations, and the explicit manual scan control.
+- `frontend/app/releases/page.tsx` — release-pack index with status, version, source operation/scan, and publication summary.
+- `frontend/app/releases/[id]/page.tsx` — full pack view with evidence, rationale, proposed version, notes, announcement, decision/publication state, recovery information, and chronological audit timeline.
+- `frontend/app/operations/page.tsx` — operation history showing trigger source, repository, evidence/decision summary, suppression, result/error, uncertain/recovery status, related pack, and audit events.
+- `frontend/app/settings/schedule/page.tsx` — UTC schedule editor and display for expression, enabled state, validation, health, next/latest run, latest result, and last error.
+- `frontend/app/loading.tsx` — navigation loading feedback that performs no mutations.
+- `frontend/app/error.tsx` — recoverable dashboard error boundary without leaking backend details.
+- `frontend/app/not-found.tsx` — consistent unknown-release/route state.
+- `frontend/components/AppNav.tsx` — accessible responsive navigation for all required routes.
+- `frontend/components/ScanNowButton.tsx` — explicit, guarded manual scan mutation with busy/result feedback and no automatic invocation.
+- `frontend/components/ScheduleForm.tsx` — controlled enabled/expression editing with server validation feedback.
+- `frontend/components/DecisionForm.tsx` — actor/reason approval and rejection controls, confirmation/busy handling, and terminal-state hiding.
+- `frontend/components/StatusBadge.tsx` — text-plus-color status rendering.
+- `frontend/components/AuditTimeline.tsx` — ordered accessible audit event presentation.
+- `frontend/components/EvidenceList.tsx` — safe commit and pull-request evidence links and metadata.
+- `frontend/lib/api.ts` — server-only typed FastAPI client, explicit cache policy, safe error mapping, and backend URL access; marked server-only so environment values cannot enter client bundles.
+- `frontend/lib/types.ts` — API view types for schedules, operations, packs, evidence, publication, recovery, and audit records.
+- `frontend/lib/format.ts` — UTC date/result display helpers with deterministic fallbacks.
+- `frontend/app/api/scans/route.ts` — same-origin POST proxy used only by the Scan now component.
+- `frontend/app/api/schedule/route.ts` — same-origin schedule update proxy.
+- `frontend/app/api/releases/[id]/approve/route.ts` — same-origin approval proxy preserving backend status/error truth.
+- `frontend/app/api/releases/[id]/reject/route.ts` — same-origin rejection proxy preserving backend status/error truth.
+- `frontend/app/api/releases/[id]/reconcile/route.ts` — same-origin explicit recovery proxy for uncertain publication states.
 
-Implementation may place small private view-model helpers in `src/routes.py`. A separate `src/view_models.py` should be created only if route preparation becomes large enough to obscure request handling; it is not otherwise planned.
+### Frontend tests
 
-## Build order
+- `frontend/components/ScanNowButton.test.tsx` — no mount-time request, one request per explicit action, busy state, suppression, and failure rendering.
+- `frontend/components/ScheduleForm.test.tsx` — five-field validation feedback, UTC labeling, enabled/disabled submission, and persisted metadata display.
+- `frontend/components/DecisionForm.test.tsx` — required trimmed actor/reason, approval/rejection endpoints, terminal-state behavior, and backend errors.
+- `frontend/components/AuditTimeline.test.tsx` — ordered actor/reason/result and failure/recovery rendering.
+- `frontend/lib/format.test.ts` — UTC and absent-value formatting.
+- `frontend/e2e/dashboard.spec.ts` — required route/direct-navigation/history checks, responsive smoke checks, and proof that navigation/reload does not create operations.
+- `frontend/e2e/schedule.spec.ts` — invalid editing, UTC persistence across API restart, deterministic scheduled draft creation, disable behavior, and overlap suppression.
+- `frontend/e2e/workflow.spec.ts` — manual scan, release/non-release evidence, approval with immediate publication, terminal rejection, audit display, publication/GitHub failure, uncertain state, and recovery.
 
-1. **Characterize existing contracts.** Run the current offline tests and inspect the pack, scan, status, publication, reconciliation, and audit representations. Preserve route paths and response shapes except for the specified mandatory approval reason and approval-triggered publication behavior.
-2. **Add read models and decision validation.** Extend `Store` with deterministic reverse-chronological pack listing, scan lookup, and pack audit filtering. Enforce trimmed, non-blank reasons for approval and rejection at the store boundary so HTML, API, and direct workflow callers cannot bypass the rule. Update review phase signatures and focused governance/recovery tests.
-3. **Unify API decision orchestration.** Update the existing approve endpoint to validate actor/reason, record approval, and immediately invoke publication; update rejection validation without introducing a write. Map validation/state errors to non-success API responses and external publication failures to non-success responses while relying on the existing durable attempt/status/audit handling. Keep the explicit publish and reconciliation endpoints for compatibility and recovery, subject to their canonical status guards.
-4. **Build presentation view data.** For each pack, combine canonical pack data with its creation time, relevant audit events, and stored scan evidence. Sort packs by creation timestamp descending with a deterministic ID tie-break. Honor an explicit canonical current marker if one becomes available; because the current model has no such marker, select the newest pack by default. Derive published-only metrics from the stored scan and rendered changelog: commit count, pull-request count, and count of non-blank changelog item lines.
-5. **Add templates and styling.** Implement the shared shell, review list, pack detail, and local CSS. Use semantic HTML, visible keyboard focus, labels associated with fields, status text in addition to color, real links, and responsive layout. Do not rely on client-side rendering or submission.
-6. **Wire HTML routes.** Make the primary review route render all packs and accept a selected pack query/path state. Add a stable full-review URL per pack and POST approve/reject form routes. Missing packs return a real 404 page/response; invalid reasons and workflow/publication errors re-render the detail with a visible error and proper non-success status; successful decisions redirect to the canonical detail page.
-7. **Add UI and API regression tests.** Exercise empty, pending/in-progress, published/healthy, rejected/failed, and mixed datasets. Use a fake GitHub publisher to verify exact write counts and failure behavior. Parse returned HTML and assert meaningful content/classes/links rather than relying on screenshots alone.
-8. **Update operator documentation and verify.** Document startup and UI/API use, explicitly naming `GITHUB_TOKEN`, `GITHUB_OWNER`, and `GITHUB_REPO`. Run the complete offline test suite and manually inspect representative pages at desktop and narrow widths with JavaScript disabled.
+## Existing files to update
+
+- `src/models.py` — add typed operation, trigger/result, schedule, scheduler health, and lease-facing domain/view contracts without changing existing persisted pack/scan meanings.
+- `src/store.py` — invoke migrations and add transactional schedule, scheduler, operation, lease, joined detail/list, and audit queries; retain existing compare-and-set decision/publication/reconciliation behavior and all historical records.
+- `src/config.py` — add non-secret scheduler timing/instance configuration and safe server defaults while keeping GitHub token redacted and environment-only.
+- `src/app.py` — initialize migrations, recover durable scheduler state, start/stop the scheduler in lifespan, and support injected clock/runner dependencies for deterministic tests. Production startup still validates the configured repository.
+- `src/routes.py` — remove legacy HTML rendering, retain compatible governed JSON routes, add read APIs for dashboard releases/operations/schedule, add explicit manual operation and schedule update APIs, return complete source/evidence/audit/publication/recovery views, and map validation/conflict/external failures to truthful HTTP responses.
+- `src/phases/scan.py` — accept operation/lease-safe orchestration needs without embedding trigger-specific behavior; preserve immutable evidence collection and classification.
+- `src/phases/draft.py` — keep pack creation conditional on release worthiness while allowing the runner to record a durable non-release result.
+- `src/phases/publish.py` — retain immediate governed publication and uncertain-outcome safety while exposing enough structured outcome information for operation/recovery views.
+- `src/phases/rollback.py` — connect reconciliation outcomes to operation recovery presentation/audit without weakening existing matching/absent/conflict checks.
+- `tests/test_config.py` — cover scheduler configuration defaults and confirm secret redaction.
+- `tests/test_core.py` — adapt canonical workflow tests to operation linkage while retaining classification/version/draft assertions.
+- `tests/test_governance.py` — retain mandatory trimmed actor/reason and terminal decision tests under migrated persistence.
+- `tests/test_recovery_audit.py` — verify uncertain publication and reconciliation are reflected in both preserved audit and operation recovery state.
+- `tests/test_routes.py` — cover new dashboard APIs, schedule validation, operation payloads, explicit scan-only mutation, compatibility routes, decision outcomes, and safe error statuses.
+- `tests/test_health.py` — cover application and scheduler health/lifespan behavior.
+- `README.md` — replace scaffold text with clean Python/npm setup, development and production startup, backend/frontend URLs, all environment variables, migrations, UTC schedule semantics, durable restart behavior, and the complete verification commands.
+- `src/OPERATIONS.md` — document schedule ownership/health, lease and suppression behavior, restart/interruption recovery, backup/migration procedure, manual versus scheduled operations, publication reconciliation, secrets, and deterministic browser-test procedure.
+- `.gitignore` — ignore Next.js output, frontend coverage/test artifacts, Playwright reports, and local frontend environment files while retaining lockfiles.
+- `init.sh` — keep one-command Python setup and install the locked frontend dependencies once `frontend/package-lock.json` exists; print the exact required verification sequence.
+
+The existing `requirements.txt` and locked project requirements will not be changed. Cron parsing and scheduling use the Python standard library and existing FastAPI lifecycle primitives. `criteria.json` will not be edited except by a later acceptance phase that is authorized to flip `passes` values.
+
+## Legacy files to remove after replacement
+
+- `src/templating.py`
+- `src/templates/base.html`
+- `src/templates/review_list.html`
+- `src/templates/pack_detail.html`
+- `src/static/review.css`
+- `tests/test_review_ui.py`
+
+Removal occurs only after equivalent API and Next.js coverage is passing. The old `/review` pages are not retained as a second state-changing interface; optional redirects may point operators to the configured Next.js dashboard, but FastAPI remains the source of truth.
+
+## Implementation order
+
+1. **Baseline and characterize.** Run the current backend suite and record current schema, endpoint, scan/draft, decision, publication, recovery, and audit contracts. Create a representative current-version database fixture before changing persistence.
+2. **Introduce safe migrations.** Add schema versioning and the additive schedule/operation/lease structures. Backfill old scans into legacy operation views without changing existing rows. Prove migration idempotence, foreign-key relationships, record counts, JSON payloads, decisions, attempts, reconciliations, and audit order before proceeding.
+3. **Add cron and schedule storage.** Implement strict five-field parsing and UTC next occurrence calculation, then schedule CRUD and scheduler health metadata. Reject malformed expressions atomically so the last valid persisted schedule remains unchanged.
+4. **Build the common operation runner.** Create operation intent first, transactionally claim the singleton lease, record suppression on conflict, run the existing scan/classify/draft path, link evidence/verdict/pack, and complete with a distinct draft-created, non-release, failed, or uncertain result. Renew and release the lease safely, sanitize errors, and append audit records for every attempted trigger.
+5. **Run scheduling from application lifespan.** Add a cancellable scheduler loop using injected UTC clock/wake primitives. Persist due slot and heartbeat before/around dispatch, enforce one execution per slot across restarts/processes, recover stale leases and interrupted records, and make disabled schedules inert. Confirm shutdown does not erase durable state.
+6. **Expose dashboard APIs.** Add schedule, release, operation, manual scan, decision, and recovery representations while preserving existing API paths. Ensure GETs are read-only, POST manual scan is the only scan mutation, approval publishes immediately, rejection is terminal, and failures/uncertainty remain truthful.
+7. **Create the Next.js shell and server data layer.** Add reproducible tooling, strict types, server-only API access, responsive navigation, route-level loading/error/not-found handling, and the five required app routes. Do not use `NEXT_PUBLIC_` for credentials or embed FastAPI/GitHub secrets in HTML, JavaScript, browser storage, or browser-visible headers.
+8. **Add explicit controls and detail views.** Implement Scan now, schedule editing, decision, and recovery components. Render operation evidence/results and full pack source/version/content/publication/audit information. Invalidate/refetch only after explicit mutations; never trigger a scan from effects, server rendering, prefetch, polling, or retries.
+9. **Add unit and backend integration coverage.** Test migration preservation, cron boundaries, lease races, scheduler restart/catch-up semantics, shared workflows, failures, governance, and API read/write separation with temporary SQLite files and deterministic fake GitHub data.
+10. **Add non-optional Playwright coverage.** Start the deterministic FastAPI fixture and Next.js app from Playwright configuration, reset state per test, control time and held scans without wall-clock sleeps, and exercise actual browser routes and forms. Treat missing browser executable, skipped tests, timeout, web-server failure, or zero executed tests as a failing command.
+11. **Remove the legacy HTML UI and update documentation.** Delete server templates/static assets only after Next routes cover their governed behavior. Document clean setup, production topology, UTC scheduling, restart/migration/recovery operations, environment variables, and browser testing.
+12. **Run release gates in order.** Execute `.venv/bin/python -m pytest -q`, `npm --prefix frontend test`, `npm --prefix frontend run test:e2e`, and `npm --prefix frontend run build`. Do not report completion unless all four execute and pass without skips used to satisfy UI criteria.
 
 ## Acceptance criteria
 
-### Review list and timeline
+### Dashboard routes and mutation safety
 
-- The primary HTML review page returns 200 with zero packs and presents a useful empty state.
-- With packs present, every durable pack appears exactly once in both the main card collection and timeline, ordered newest creation timestamp first.
-- The timeline is vertical, uses connected dots, and provides readable status text; meaning is not conveyed by color alone.
-- An explicitly current canonical pack is selected when such data exists; otherwise the newest pack is highlighted. Selection remains understandable without JavaScript.
-- Every card shows version, canonical status pill, timestamped pack-specific audit activity, and a working link to the full review page.
-- Published cards alone show correct commit, pull-request, and changelog-line metric tiles. Metric values are prominent and labels are small/muted.
+- `/`, `/releases`, `/releases/[id]`, `/operations`, and `/settings/schedule` render through the Next.js app router on direct load and client navigation, with usable desktop and mobile layouts and clear empty/loading/error states.
+- Any network-reachable dashboard user can use all controls; no role gate is introduced. Approval and rejection nonetheless require independently server-validated, trimmed, nonblank actor and reason.
+- Visiting, prefetching, navigating, refreshing, polling, building, or server-rendering any page creates zero scans and zero scan operations. One deliberate Scan now submission creates exactly one manual attempt; disabled/double-clicked controls do not duplicate it.
+- Browser-visible requests, response bodies, HTML, JavaScript bundles/source maps, local/session storage, logs, and environment payloads contain no GitHub token or backend secret.
 
-### Full pack review
+### Schedule and restart behavior
 
-- A valid detail URL displays canonical version/status and the complete changelog, release notes, announcement text, and rationale where available, without silently modifying stored content.
-- Supporting commits and pull requests come from the pack's stored scan and include safe, clickable GitHub URLs plus identifying text.
-- Pending and active in-progress review states expose both approve and reject forms. Terminal published, rejected, failed/conflict, or uncertain states do not offer an invalid fresh decision; their status and audit outcome remain visible.
-- Both forms contain labeled actor and reason inputs, and reason is required by HTML and independently enforced server-side after whitespace trimming.
-- Unknown pack IDs return HTTP 404 rather than an empty or misleading success page.
+- The database contains exactly one configurable schedule. A save accepts a valid five-field cron expression and enabled flag, labels it UTC, and survives Store/FastAPI restart unchanged; invalid or non-five-field input returns a visible error and does not replace the previous value.
+- The schedule view reports expression, enabled state, scheduler health/heartbeat, calculated next run, latest attempted run, latest result, and last error using persisted data. Disabled schedules have no next run and produce no due operations as deterministic time advances.
+- A due UTC slot is claimed at most once across scheduler loops/API instances and produces one scheduled operation. Restart resumes future/due scheduling from persisted slot state without duplicate successful execution.
+- An API death cannot leave an eternal lock: lease expiry/startup recovery makes the interrupted operation visibly failed or uncertain, records recovery/audit information, and permits a later run. It is never silently marked successful.
 
-### Decisions, publication, and errors
+### Unified operations and durable lease
 
-- Blank or whitespace-only approval and rejection reasons are rejected through HTML, JSON API, and direct store/workflow paths, with no status transition or GitHub write.
-- A valid rejection records the actor and reason, changes the durable pack status to rejected, adds a timestamped audit event, remains visible after database reopen, and never calls GitHub publication.
-- A valid approval records actor/reason and immediately makes exactly one publication attempt using the existing publication phase. On success, the durable status is published, the release receipt appears in audit activity, and HTML redirects to the updated detail.
-- A GitHub/API publication exception produces a non-success HTTP response and visible error, while the durable pack status/attempt/audit reflect the canonical uncertain or failed outcome. No page or API payload reports publication success or published status unless the store recorded it.
-- Invalid/repeated/concurrent decisions continue to be rejected by canonical compare-and-set guards. The existing explicit publish/reconcile APIs remain available for CLI/cron compatibility and recovery but cannot bypass legal status transitions.
+- Manual and scheduled triggers call the same runner and existing GitHub scan/classification/draft logic. Both record trigger source, repository, timestamps, scan/evidence, verdict/rationale, result, related pack (if any), safe error, recovery state, and related audit events.
+- Release-worthy deterministic commit/PR evidence creates one complete pending draft with proposed version, source scan, evidence-backed notes/body, rationale, announcement, and no automatic decision/publication. Non-release-worthy evidence records a completed non-release operation and no pack.
+- The singleton SQLite lease is acquired transactionally and shared by manual and scheduled paths. While one scan is held, every competing trigger records its own auditable `suppressed` operation and performs no GitHub scan or draft creation.
+- GitHub read failures produce a failed operation with a safe operator message and audit event. Sensitive exception/transport data is not persisted or returned.
 
-### Styling, accessibility, and progressive enhancement
+### Packs, governance, publication, and recovery
 
-- Pages work end to end with JavaScript disabled: list/detail navigation, reason entry, approve/reject submission, errors, and success navigation.
-- Layout uses a white background, sans-serif type, whitespace, 1px borders, and no shadows. Amber/orange is limited to pending/in-progress, green to published/healthy, red to rejected/failed, and blue to links.
-- Forms have explicit labels, controls are keyboard reachable, focus is visible, headings/landmarks are ordered meaningfully, and status/error text is announced/readable without color.
-- At narrow viewport widths the timeline and cards remain readable without horizontal page scrolling or overlapping controls.
-- All assets are local and directly served by FastAPI; there is no frontend framework, SPA runtime, Node dependency, CDN requirement, or asset compilation step.
+- Release list/detail responses and pages show every pack with canonical status, proposed version, source operation and scan, commits and pull requests, decision rationale, complete notes/body, announcement, approval/rejection information, publication attempt/outcome, recovery status, and chronological audit timeline.
+- No scheduler or page activity approves or publishes a pending pack. Approval with a valid actor/reason records the decision once and immediately invokes the existing governed publication flow exactly once. Success records the receipt and published state.
+- Missing/blank actor or reason causes no transition or GitHub write. Rejection with valid fields records actor/reason/audit, becomes terminal after restart, never publishes, and exposes no subsequent approval/publication control.
+- Publication exceptions are non-success responses and leave the canonical failed/uncertain attempt visible. Reconciliation records matching/absent/conflict recovery without deleting the original failure, and duplicate decisions/publications remain blocked by durable state guards.
 
-### Compatibility, security scope, and operations
+### Migration and compatibility
 
-- Existing health, scan, pack, publish/reconcile, and audit API routes continue to work for non-browser clients, with decision request changes limited to the specified required reason and immediate approval publication behavior.
-- UI routes do not accept or expose repository credentials. No authentication/authorization behavior is implied or added; documentation clearly says anyone with network access may view and act for now.
-- Operator documentation explicitly names and explains `GITHUB_TOKEN`, `GITHUB_OWNER`, and `GITHUB_REPO`, and describes publication failure/reconciliation without suggesting a failed action succeeded.
-- The complete default `pytest` suite is offline and passes using temporary SQLite databases and fake GitHub clients, including representative pending, published, rejected, failed/uncertain, and empty UI states.
+- Upgrading a database produced by the current repository is transactional and idempotent. Every existing scan, verdict, pack, decision, attempt, reconciliation, and audit row retains its data, identifier, relationship, and order; no reset or destructive migration is required.
+- Historical scans/packs are visible through the new operations/releases APIs after backfill. Existing health, pack, audit, approve/reject, explicit publish, and reconcile integrations retain compatible governed behavior except where the specification already requires actor/reason and immediate publication on approval.
+- Migration failure rolls back without leaving a partially upgraded schema, and documentation includes backup and upgrade/restart steps.
+
+### Automated gates and documentation
+
+- Backend tests run offline against temporary SQLite databases and deterministic fakes, covering cron parsing, migration preservation, scheduling/restart, lease races/suppression, shared workflows, governance, publication uncertainty, and recovery.
+- Frontend unit tests cover mutation safety, schedule validation/display, decision validation, UTC formatting, audit/failure rendering, and accessible controls.
+- `npm --prefix frontend run test:e2e` executes real Playwright browser tests for all required routes, no-navigation scan behavior, schedule edit/persistence/restart, scheduled draft creation, manual scans, approval, rejection, audit, suppression, failures, and recovery. Required tests cannot pass by skip, timeout, absent browser, mocked-out page routing, or zero-test execution.
+- `npm --prefix frontend run build` produces a successful production Next.js build with all five routes and no secret leakage.
+- README and operations documentation are sufficient from a clean checkout and cover Python/npm setup, `GITHUB_TOKEN`, `GITHUB_OWNER`, `GITHUB_REPO`, `RELEASE_MANAGER_DB`, frontend-to-backend server URL, scheduler timing/UTC semantics, durable lease and suppression, restart/recovery, non-destructive migration, production operation, and the exact backend/unit/E2E/build commands.

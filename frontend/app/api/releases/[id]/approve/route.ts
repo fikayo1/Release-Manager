@@ -1,0 +1,1 @@
+import {api} from '@/lib/api';export async function POST(request:Request,{params}:{params:Promise<{id:string}>}){const {id}=await params;try{return Response.json(await api(`/api/packs/${id}/approve`,{method:'POST',body:await request.text()}))}catch{return Response.json({detail:'Approval or publication failed'},{status:409})}}

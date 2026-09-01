@@ -1,0 +1,1 @@
+import {api} from '@/lib/api';export async function POST(){try{return Response.json(await api('/api/scans',{method:'POST'}),{status:201})}catch{return Response.json({detail:'Scan could not be completed'},{status:502})}}

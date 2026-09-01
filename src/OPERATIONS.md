@@ -23,14 +23,9 @@ token, an unreadable repository, rate limiting, or transport failure prevents
 startup. `GET /health` returns `{"status":"ok"}` only after startup succeeds.
 Do not put the token in command-line arguments, API bodies, or the database.
 
-Open `/review` for the server-rendered review queue; every pack links to
-`/review/packs/{id}` for evidence, audit history, and decision forms. There is
-currently **no authentication or authorization**: anyone who can reach the
-service over the network can view packs and submit decisions. Restrict network
-access accordingly. Both approval and rejection require a named actor and a
-non-blank reason. Approval immediately attempts GitHub publication. A failed
-request is not success: the detail page displays the durable uncertain state,
-and an operator must reconcile before retrying.
+Start the Next.js dashboard with `RELEASE_MANAGER_API_URL=http://127.0.0.1:8000 npm --prefix frontend run dev`, then open `http://127.0.0.1:3000/`. Its operator routes are `/releases`, `/operations`, and `/settings/schedule`, with evidence, audit history, and decisions at `/releases/{id}`. The compatibility server-rendered queue remains at backend route `/review`.
+
+There is currently **no authentication or authorization**: anyone who can reach the service over the network can view packs and submit decisions. Restrict network access accordingly. Both approval and rejection require a named actor and a non-blank reason. Approval immediately attempts GitHub publication. A failed request is not success: the detail page displays the durable uncertain state, and an operator must reconcile before retrying. The FastAPI lifespan starts the UTC scheduler; `/settings/schedule` shows its heartbeat and durable latest outcome.
 
 The compatible JSON workflow is:
 

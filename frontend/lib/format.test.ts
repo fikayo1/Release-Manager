@@ -1,0 +1,1 @@
+import {describe,it,expect} from 'vitest';import {utc} from './format';describe('UTC formatting',()=>{it('handles absent and fixed dates',()=>{expect(utc()).toBe('Not yet');expect(utc('2026-01-01T00:00:00Z')).toContain('UTC')})})

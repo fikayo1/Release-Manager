@@ -1,0 +1,1 @@
+'use client';export default function ErrorPage({reset}:{reset:()=>void}){return <div className="card"><h1>Dashboard unavailable</h1><p>The release service could not be reached.</p><button onClick={reset}>Try again</button></div>}

@@ -1,0 +1,3 @@
+'use client';
+import {useState} from 'react';
+export function ScanNowButton(){const [busy,setBusy]=useState(false),[message,setMessage]=useState('');async function run(){setBusy(true);setMessage('');try{const r=await fetch('/api/scans',{method:'POST'});const data=await r.json();if(!r.ok)throw new Error(data.detail||'Scan failed');setMessage(data.result==='suppressed'?'Suppressed: another scan is running':`Completed: ${data.result}`)}catch(e){setMessage(e instanceof Error?e.message:'Scan failed')}finally{setBusy(false)}}return <div><button disabled={busy} onClick={run}>{busy?'Scanning…':'Scan now'}</button><p role="status">{message}</p></div>}

@@ -10,6 +10,8 @@ from .models import primitive
 from .templating import Templates
 from .phases import approve, draft, publish, reconcile, reject, scan
 from .store import StateError
+from .cron import CronError
+from .operations import OperationRunner
 
 router = APIRouter()
 templates = Templates()
@@ -26,6 +28,10 @@ def deps(request: Request):
 class Decision(BaseModel):
     actor: str
     reason: str
+
+class ScheduleUpdate(BaseModel):
+    expression: str
+    enabled: bool
 
 
 def _detail_context(request, pack_id, error=None, values=None):
@@ -126,9 +132,32 @@ async def review_decision(pack_id: str, decision: str, request: Request):
 @router.post("/api/scans", status_code=201)
 def start(request: Request):
     store, gh = deps(request)
-    snapshot, verdict = scan(store, gh, now())
-    pack = draft(store, snapshot, verdict, now())
-    return {"scan": primitive(snapshot), "verdict": primitive(verdict), "pack": primitive(pack) if pack else None}
+    return OperationRunner(store, gh).run("manual")
+
+@router.get("/api/operations")
+def list_operations(request: Request):
+    return deps(request)[0].operations()
+
+@router.get("/api/operations/{operation_id}")
+def get_operation(operation_id: str, request: Request):
+    try: return deps(request)[0].operation(operation_id)
+    except KeyError: raise HTTPException(404,"operation not found")
+
+@router.get("/api/schedule")
+def get_schedule(request: Request): return deps(request)[0].schedule()
+
+@router.put("/api/schedule")
+def put_schedule(data: ScheduleUpdate, request: Request):
+    try: return deps(request)[0].update_schedule(data.expression,data.enabled,now())
+    except CronError as exc: raise HTTPException(422,str(exc))
+
+@router.get("/api/releases")
+def releases(request: Request): return [_pack_view(deps(request)[0],p) for p in deps(request)[0].packs()]
+
+@router.get("/api/releases/{pack_id}")
+def release_detail(pack_id: str, request: Request):
+    try: return deps(request)[0].pack_detail(pack_id)
+    except KeyError: raise HTTPException(404,"pack not found")
 
 
 @router.get("/api/packs")

@@ -4,6 +4,7 @@ import sqlite3
 from typing import Any
 
 from .models import primitive
+from .migrations import migrate
 
 
 class StateError(RuntimeError):
@@ -34,6 +35,7 @@ class Store:
                 CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY,kind TEXT NOT NULL,subject_id TEXT NOT NULL,actor TEXT,detail TEXT NOT NULL,created_at TEXT NOT NULL);
                 """
             )
+            migrate(db)
 
     def event(self, db, kind, subject, now, detail=None, actor=None):
         db.execute(
@@ -226,6 +228,81 @@ class Store:
                 {**publication, "reconciliation_result": result},
                 publication["approver"],
             )
+
+    def create_operation(self, oid, source, repository, now, scheduled_for=None):
+        with self.connect() as db:
+            db.execute("INSERT INTO operations(id,source,repository,status,started_at,scheduled_for) VALUES(?,?,?,'running',?,?)", (oid,source,repository,now,scheduled_for))
+            self.event(db,"operation_started",oid,now,{"source":source,"repository":repository})
+
+    def acquire_lease(self, owner, oid, now, expires):
+        with self.connect() as db:
+            db.execute("DELETE FROM scan_lease WHERE expires_at<=?", (now,))
+            try:
+                db.execute("INSERT INTO scan_lease VALUES(1,?,?,?,?)", (owner,oid,expires,now))
+                return True
+            except sqlite3.IntegrityError:
+                return False
+
+    def release_lease(self, owner, oid):
+        with self.connect() as db: db.execute("DELETE FROM scan_lease WHERE owner=? AND operation_id=?",(owner,oid))
+
+    def renew_lease(self, owner, oid, now, expires):
+        """Extend only the lease still owned by this operation."""
+        with self.connect() as db:
+            return db.execute(
+                "UPDATE scan_lease SET heartbeat_at=?,expires_at=? WHERE owner=? AND operation_id=?",
+                (now, expires, owner, oid),
+            ).rowcount == 1
+
+    def finish_operation(self, oid, result, now, scan_id=None, pack_id=None, error=None):
+        with self.connect() as db:
+            db.execute("UPDATE operations SET status='completed',result=?,scan_id=?,pack_id=?,error=?,finished_at=? WHERE id=?",(result,scan_id,pack_id,error,now,oid))
+            self.event(db,"operation_finished",oid,now,{"result":result,"error":error})
+
+    def operation(self, oid):
+        with self.connect() as db:
+            row=db.execute("SELECT * FROM operations WHERE id=?",(oid,)).fetchone()
+            if not row: raise KeyError(oid)
+            return dict(row)
+
+    def operations(self):
+        with self.connect() as db:
+            rows=db.execute("SELECT * FROM operations ORDER BY started_at DESC,id DESC").fetchall()
+            operations = [dict(row) for row in rows]
+            for operation in operations:
+                operation["activity"] = [record for record in self.audit() if record["subject_id"] == operation["id"]]
+                if operation["pack_id"]:
+                    pack = db.execute("SELECT status FROM packs WHERE id=?", (operation["pack_id"],)).fetchone()
+                    operation["pack_status"] = pack["status"] if pack else None
+            return operations
+
+    def schedule(self):
+        from .cron import next_run
+        from datetime import datetime, timezone
+        with self.connect() as db:
+            row=dict(db.execute("SELECT * FROM schedules WHERE id=1").fetchone())
+            health=dict(db.execute("SELECT * FROM scheduler_state WHERE id=1").fetchone())
+        row["enabled"]=bool(row["enabled"]); row["timezone"]="UTC"; row["health"]=health
+        row["next_run"]=next_run(row["expression"],datetime.now(timezone.utc)).isoformat() if row["enabled"] else None
+        return row
+
+    def update_schedule(self, expression, enabled, now):
+        from .cron import parse
+        parse(expression)
+        with self.connect() as db:
+            db.execute("UPDATE schedules SET expression=?,enabled=?,updated_at=? WHERE id=1",(expression.strip(),int(enabled),now))
+            self.event(db,"schedule","1",now,{"expression":expression.strip(),"enabled":bool(enabled)})
+        return self.schedule()
+
+    def pack_detail(self, pid):
+        pack=self.pack(pid); pack["evidence"]=self.scan(pack["scan_id"]); pack["activity"]=self.pack_audit(pid)
+        with self.connect() as db:
+            decision=db.execute("SELECT * FROM decisions WHERE pack_id=?",(pid,)).fetchone()
+            attempts=db.execute("SELECT * FROM attempts WHERE pack_id=? ORDER BY id",(pid,)).fetchall()
+            operation=db.execute("SELECT id FROM operations WHERE pack_id=?",(pid,)).fetchone()
+        pack["decision"]=dict(decision) if decision else None; pack["publication"]=[dict(x) for x in attempts]
+        pack["operation_id"]=operation["id"] if operation else None
+        return pack
 
     def audit(self):
         """Return chronological, JSON-native audit records.
