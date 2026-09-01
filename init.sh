@@ -10,5 +10,8 @@ cd "$(dirname "$0")"
 python3 -m venv .venv
 ./.venv/bin/pip install --quiet --upgrade pip
 ./.venv/bin/pip install --quiet -r requirements.txt
+if [[ -f frontend/package.json ]]; then
+  npm --prefix frontend ci --silent
+fi
 
-echo "ready. tests:  .venv/bin/python -m pytest -q"
+echo "ready. tests: .venv/bin/python -m pytest -q && npm --prefix frontend test && npm --prefix frontend run test:e2e && npm --prefix frontend run build"
