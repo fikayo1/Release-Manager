@@ -31,8 +31,6 @@ class Settings:
     database_url: str = ""
     # Shared secret Vercel Cron sends as ``Authorization: Bearer``.
     cron_secret: str = ""
-    # Request header that proves a Vercel Cron invocation (name overridable).
-    cron_header: str = "x-vercel-cron"
 
     def __post_init__(self):
         missing = [env for attr, env in _OAUTH_ENV if not getattr(self, attr).strip()]
@@ -53,7 +51,6 @@ class Settings:
             web_url=os.getenv("RELEASE_MANAGER_WEB_URL", ""),
             database_url=os.getenv("DATABASE_URL", "") or os.getenv("POSTGRES_URL", ""),
             cron_secret=os.getenv("CRON_SECRET", ""),
-            cron_header=os.getenv("VERCEL_CRON_HEADER", "x-vercel-cron"),
         )
 
     @property

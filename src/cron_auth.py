@@ -7,6 +7,9 @@ the secret are never logged.
 import hmac
 
 
+_INTERNAL_CRON_PROOF_HEADER = "x-vercel-cron"
+
+
 def authorize_cron(headers, settings) -> bool:
     secret = (getattr(settings, "cron_secret", "") or "").strip()
     if not secret:
@@ -14,5 +17,7 @@ def authorize_cron(headers, settings) -> bool:
     presented = headers.get("authorization", "") or headers.get("Authorization", "")
     if not hmac.compare_digest(presented.strip(), f"Bearer {secret}"):
         return False
-    header_name = getattr(settings, "cron_header", "x-vercel-cron") or "x-vercel-cron"
-    return bool(headers.get(header_name) or headers.get(header_name.lower()))
+    return bool(
+        headers.get(_INTERNAL_CRON_PROOF_HEADER)
+        or headers.get(_INTERNAL_CRON_PROOF_HEADER.lower())
+    )
