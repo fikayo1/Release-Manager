@@ -2,85 +2,88 @@
   "criteria": [
     {
       "id": "C1",
-      "description": "The server-rendered review dashboard presents every release pack in the requested timeline-and-cards layout.",
+      "description": "The existing OAuth flow authorizes through deterministic doubles and permits repository selection without live GitHub access.",
       "verification": [
-        "Start Release Manager and open the review interface in a browser.",
-        "Confirm every pack returned by the existing pack-list API appears once in the left timeline and once as a main-panel card, ordered newest first.",
-        "Confirm timeline dots are connected by a rail and the current pack, or newest pack when none is current, is visibly highlighted.",
-        "Confirm each card displays its version, status pill, and timestamped audit events."
+        "Start the product with the operator database and a deterministic OAuth/GitHub double that returns repositories A and B plus a unique fake token canary.",
+        "From `/settings/github`, complete Continue with GitHub and return through the existing callback.",
+        "Verify the settings page displays repositories A and B and allows A to be selected.",
+        "Verify the GitHub double journal shows the expected authorization/token and repository-list interactions, with no request to live GitHub."
       ],
-      "passes": true,
+      "passes": false,
       "priority": 1
     },
     {
       "id": "C2",
-      "description": "A reviewer can open a pack and inspect all release content and supporting links.",
+      "description": "The OAuth access token is not exposed to the browser or logs after OAuth completes.",
       "verification": [
-        "From the dashboard, open a pack's full review page.",
-        "Confirm the page shows version, changelog, release notes, announcement, and all supporting commit and pull-request links supplied by the API.",
-        "Activate one commit link and one pull-request link and confirm each resolves to its intended external URL."
+        "Use the fake token canary while capturing browser request/response traffic, console output, and backend/frontend process logs from callback completion through loading and saving repository settings.",
+        "Verify the canary is absent from the final address-bar URL and every browser-observed request URL.",
+        "Verify the canary is absent from rendered page text/HTML and every readable browser-observed HTTP response body.",
+        "Verify every key and value in both `localStorage` and `sessionStorage` lacks the canary.",
+        "Verify the canary is absent from browser console output and captured backend/frontend logs."
       ],
-      "passes": true,
+      "passes": false,
       "priority": 1
     },
     {
       "id": "C3",
-      "description": "Anyone with network access can approve a pending or in-progress pack with a reason, triggering publication.",
+      "description": "The selected repository survives a real backend restart using the same operator SQLite database.",
       "verification": [
-        "Without signing in, open a pending or in-progress pack and attempt approval with an empty or whitespace-only reason; confirm submission is blocked or rejected with a visible validation message.",
-        "Submit approval with a non-blank reason and confirm the publication workflow is triggered.",
-        "After publication completes, reload the page and query the same pack through the existing API; confirm its canonical status is published and its audit timeline contains the approval reason, publication outcome, and timestamps.",
-        "If publication fails, confirm a visible failure is shown and the pack is not falsely displayed as published."
+        "Complete OAuth against the operator database, select repository A, and confirm A is shown as selected.",
+        "Terminate the backend process without replacing or resetting the database.",
+        "Start a new backend process against that exact operator database path and reload `/settings/github`.",
+        "Verify A is still shown as selected without selecting it again or repeating OAuth."
       ],
-      "passes": true,
+      "passes": false,
       "priority": 1
     },
     {
       "id": "C4",
-      "description": "Anyone with network access can reject a pending or in-progress pack with a reason.",
+      "description": "Changing selection from A to B makes the next manual scan target B while previously created A work remains associated with A.",
       "verification": [
-        "Without signing in, open a pending or in-progress pack and attempt rejection with an empty or whitespace-only reason; confirm submission is blocked or rejected with a visible validation message.",
-        "Submit rejection with a non-blank reason, reload the page, and confirm the pack is visibly rejected.",
-        "Query the same pack through the existing API and confirm its status is rejected and its audit timeline contains the rejection, reason, and timestamp."
+        "With A selected in the operator database, start a manual scan and retain its resulting A-targeted work record.",
+        "Change the selected repository to B, clear the GitHub double request journal, and click the existing Scan now control.",
+        "Verify the next scan completes against B and the double journal contains B-targeted requests with no A-targeted request for that new scan.",
+        "Reload or query the existing A work and verify its displayed/API-visible repository is still A."
       ],
-      "passes": true,
+      "passes": false,
       "priority": 1
     },
     {
       "id": "C5",
-      "description": "Published packs show the requested release metrics while non-published packs do not present them as published results.",
+      "description": "After selection changes to B, the next due scheduled scan targets B exactly as the manual scan does.",
       "verification": [
-        "View a published pack card and confirm it contains metric tiles for commit count, pull-request count, and changelog line count.",
-        "Confirm each tile uses a large bold numeric value with a smaller muted label.",
-        "Compare the displayed values with the pack data returned by the API.",
-        "View a non-published pack and confirm it does not display those metrics as published results."
+        "Keep B selected, enable a deterministically due schedule, and clear the GitHub double request journal.",
+        "Drive the real scheduler path with the controlled acceptance-test clock or due-schedule harness.",
+        "Verify one scheduled scan is created for B and reaches the expected observable result.",
+        "Verify the double journal contains B-targeted requests and no A-targeted request for that scheduled scan."
       ],
-      "passes": true,
-      "priority": 2
+      "passes": false,
+      "priority": 1
     },
     {
       "id": "C6",
-      "description": "The interface follows the specified minimalist, semantic-status visual design.",
+      "description": "Changing the current selection to B never retargets reconcile, rollback, approval, or publish actions for existing A work.",
       "verification": [
-        "Inspect the dashboard and full pack page at a desktop viewport.",
-        "Confirm a white background, sans-serif type, generous spacing, 1px card or section borders, and no card shadows.",
-        "Confirm pending or in-progress indicators are amber/orange, published or healthy indicators green, rejected or failed indicators red, and links blue.",
-        "Confirm decorative colors are not used for unrelated content."
+        "Prepare A-targeted records in the operator database in states where reconcile, rollback, approval, and publication are each applicable, then select B.",
+        "Perform each action through its existing UI or API entry point and inspect the resulting workflow state and GitHub double journal.",
+        "Verify every GitHub interaction caused by each existing-work action names repository A, never B.",
+        "Verify the records remain API/UI-visible as A-targeted after the actions complete."
       ],
-      "passes": true,
-      "priority": 2
+      "passes": false,
+      "priority": 1
     },
     {
       "id": "C7",
-      "description": "The review flow remains usable as server-rendered FastAPI HTML and the product passes its required verification.",
+      "description": "All existing backend, frontend unit, browser acceptance, and production-build checks remain green.",
       "verification": [
-        "Disable JavaScript in the browser, reload the review interface, and confirm packs can still be listed, opened, approved, and rejected through normal navigation and form submission.",
-        "Inspect browser network activity and confirm the initial review pages are HTML responses rather than a client-rendered SPA shell, with no frontend-framework runtime required.",
-        "Confirm operator documentation names GITHUB_TOKEN, GITHUB_OWNER, and GITHUB_REPO.",
-        "Run `.venv/bin/python -m pytest -q` from the repository root and confirm it exits successfully."
+        "Run `.venv/bin/python -m pytest -q` and expect exit code 0.",
+        "Run `npm --prefix frontend test` and expect exit code 0.",
+        "Run `npm --prefix frontend run test:e2e` with provisioned browser binaries and expect exit code 0.",
+        "Run `npm --prefix frontend run build` and expect exit code 0."
       ],
-      "passes": true,
-      "priority": 1
+      "passes": false,
+      "priority": 2
     }
   ],
   "note": "The definition of done. Later phases may ONLY flip `passes`. Editing or removing a criterion is a gate failure."
