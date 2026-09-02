@@ -23,7 +23,10 @@ export class BackendProcess {
       '--host', '127.0.0.1', '--port', String(this.port),
     ], {
       stdio: 'inherit',
-      env: { ...process.env, E2E_DB: this.dbPath, E2E_KEEP_DB: '1', E2E_API_PORT: String(this.port) },
+      env: {
+        ...process.env, E2E_DB: this.dbPath, E2E_KEEP_DB: '1',
+        E2E_API_PORT: String(this.port), E2E_WEB_URL: this.origin,
+      },
     });
     await this.waitForHealth();
   }

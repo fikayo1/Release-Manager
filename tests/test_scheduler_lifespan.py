@@ -16,7 +16,12 @@ class EmptyGitHub:
 
 
 def test_lifespan_starts_scheduler_and_heartbeat(tmp_path):
-    settings = Settings("owner", "repo", "token", str(tmp_path / "state.db"), 0.01)
+    settings = Settings(
+        database=str(tmp_path / "state.db"), scheduler_interval=0.01,
+        oauth_client_id="unit-client", oauth_client_secret="unit-secret",
+        oauth_callback_url="http://testserver/auth/github/callback",
+        session_secret="unit-session-secret-0123456789abcdef", web_url="http://testserver",
+    )
     app = create_app(settings, EmptyGitHub(), validate=False)
     with TestClient(app) as client:
         for _ in range(50):

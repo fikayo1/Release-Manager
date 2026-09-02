@@ -1,10 +1,16 @@
-"""SQLite persistence and compare-and-set governance transitions."""
+"""Dialect-aware persistence and compare-and-set governance transitions.
+
+The SQL below is written for SQLite, which remains the default and the only
+store the test and Playwright suites exercise. Postgres is selected by passing
+``dialect="postgres"`` (wired from ``DATABASE_URL`` / ``POSTGRES_URL`` in
+:mod:`src.config` / :mod:`src.app`); connection handling and the migration
+runner are dialect-aware via :mod:`src.db` and :mod:`src.migrations`.
+"""
 import json
-import sqlite3
-from typing import Any
 
 from .models import primitive
-from .migrations import migrate
+from .db import advisory_migration_lock, connect_postgres, connect_sqlite, is_integrity_error
+from .migrations import BASE, migrate
 
 
 class StateError(RuntimeError):
@@ -12,30 +18,26 @@ class StateError(RuntimeError):
 
 
 class Store:
-    def __init__(self, path: str):
+    def __init__(self, path: str, *, dialect: str = "sqlite", database_url: str = ""):
         self.path = path
+        self.dialect = dialect
+        self.database_url = database_url
         self.init()
 
     def connect(self):
-        db = sqlite3.connect(self.path)
-        db.row_factory = sqlite3.Row
-        db.execute("PRAGMA foreign_keys=ON")
-        return db
+        if self.dialect == "postgres":
+            return connect_postgres(self.database_url)
+        return connect_sqlite(self.path)
 
     def init(self):
-        with self.connect() as db:
-            db.executescript(
-                """
-                CREATE TABLE IF NOT EXISTS scans(id TEXT PRIMARY KEY, data TEXT NOT NULL, created_at TEXT NOT NULL);
-                CREATE TABLE IF NOT EXISTS verdicts(scan_id TEXT PRIMARY KEY REFERENCES scans(id), data TEXT NOT NULL);
-                CREATE TABLE IF NOT EXISTS packs(id TEXT PRIMARY KEY,scan_id TEXT UNIQUE REFERENCES scans(id),status TEXT NOT NULL,data TEXT NOT NULL,created_at TEXT NOT NULL);
-                CREATE TABLE IF NOT EXISTS decisions(id INTEGER PRIMARY KEY,pack_id TEXT UNIQUE REFERENCES packs(id),decision TEXT NOT NULL,actor TEXT NOT NULL,reason TEXT,created_at TEXT NOT NULL);
-                CREATE TABLE IF NOT EXISTS attempts(id INTEGER PRIMARY KEY,pack_id TEXT REFERENCES packs(id),result TEXT NOT NULL,error TEXT,url TEXT,created_at TEXT NOT NULL);
-                CREATE TABLE IF NOT EXISTS reconciliations(id INTEGER PRIMARY KEY,pack_id TEXT REFERENCES packs(id),result TEXT NOT NULL,detail TEXT,created_at TEXT NOT NULL);
-                CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY,kind TEXT NOT NULL,subject_id TEXT NOT NULL,actor TEXT,detail TEXT NOT NULL,created_at TEXT NOT NULL);
-                """
-            )
-            migrate(db)
+        db = self.connect()
+        try:
+            with advisory_migration_lock(db, self.dialect):
+                for statement in BASE[self.dialect]:
+                    db.execute(statement)
+                migrate(db, self.dialect)
+        finally:
+            db.close()
 
     def create_oauth_state(self, digest, session_id, created_at, expires_at):
         with self.connect() as db:
@@ -281,11 +283,20 @@ class Store:
     def acquire_lease(self, owner, oid, now, expires):
         with self.connect() as db:
             db.execute("DELETE FROM scan_lease WHERE expires_at<=?", (now,))
+            if self.dialect == "postgres":
+                # Avoid a caught unique violation leaving the Postgres
+                # transaction aborted.
+                return db.execute(
+                    "INSERT INTO scan_lease VALUES(1,?,?,?,?) ON CONFLICT (id) DO NOTHING",
+                    (owner, oid, expires, now),
+                ).rowcount == 1
             try:
                 db.execute("INSERT INTO scan_lease VALUES(1,?,?,?,?)", (owner,oid,expires,now))
                 return True
-            except sqlite3.IntegrityError:
-                return False
+            except Exception as exc:
+                if is_integrity_error(exc):
+                    return False
+                raise
 
     def release_lease(self, owner, oid):
         with self.connect() as db: db.execute("DELETE FROM scan_lease WHERE owner=? AND operation_id=?",(owner,oid))

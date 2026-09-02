@@ -14,9 +14,18 @@ class GitHub:
         return Release(tag, title, body, "now", "https://github.test/release")
 
 
+def oauth_settings(tmp_path, **overrides):
+    base = dict(
+        database=str(tmp_path / "state.db"),
+        oauth_client_id="unit-client", oauth_client_secret="unit-secret",
+        oauth_callback_url="http://testserver/auth/github/callback",
+        session_secret="unit-session-secret-0123456789abcdef", web_url="http://testserver",
+    )
+    return Settings(**{**base, **overrides})
+
+
 def client_for(tmp_path, github=None):
-    settings = Settings("owner", "repo", "token", str(tmp_path / "state.db"))
-    app = create_app(settings, github or GitHub(), validate=False)
+    app = create_app(oauth_settings(tmp_path), github or GitHub(), validate=False)
     return TestClient(app), app.state.store
 
 

@@ -7,6 +7,7 @@ startup unless ``E2E_KEEP_DB=1`` (set by the restart helper so a respawned
 process keeps the data the previous process wrote).
 """
 import asyncio
+from functools import partial
 import os
 from datetime import datetime, timezone
 from pathlib import Path
@@ -32,8 +33,8 @@ from tests.fakes import (
 
 PORT = os.getenv("E2E_API_PORT", "18000")
 API_ORIGIN = f"http://127.0.0.1:{PORT}"
-CALLBACK = f"{API_ORIGIN}/auth/github/callback"
-WEB = "http://127.0.0.1:13000"
+WEB = os.getenv("E2E_WEB_URL", "http://127.0.0.1:13000")
+CALLBACK = f"{WEB}/auth/github/callback"
 
 DB = os.getenv("E2E_DB", "/tmp/release-manager-e2e.db")
 if os.getenv("E2E_KEEP_DB") != "1":
@@ -45,8 +46,10 @@ if os.getenv("E2E_KEEP_DB") != "1":
 app = create_app(
     Settings(database=DB, scheduler_interval=3600, oauth_client_id="fixture-client",
              oauth_client_secret="fixture-secret", oauth_callback_url=CALLBACK,
-             session_secret="deterministic-browser-session-secret", web_url=WEB),
-    validate=False, oauth_service_factory=FakeOAuth,
+             session_secret="deterministic-browser-session-secret", web_url=WEB,
+             cron_secret=os.getenv("CRON_SECRET", "cron-fixed-browser-test-secret")),
+    validate=False, enable_scheduler=False,
+    oauth_service_factory=partial(FakeOAuth, authorize_origin=API_ORIGIN),
     account_client_factory=FakeAccountGitHub, github_client_factory=FakeRepositoryGitHub,
 )
 

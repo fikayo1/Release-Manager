@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from threading import Event, Thread
 from uuid import uuid4
 from .models import primitive
+from .db import is_integrity_error
 from .phases import scan, draft
 
 
@@ -29,7 +30,18 @@ class OperationRunner:
         else:
             github=self.github
             repository=f"{github.owner}/{github.repo}"
-        self.store.create_operation(operation_id,source,repository,now,scheduled_for)
+        try:
+            self.store.create_operation(operation_id,source,repository,now,scheduled_for)
+        except Exception as exc:
+            if not is_integrity_error(exc):
+                raise
+            # A concurrent tick already claimed this scheduled slot. The durable
+            # winning operation is the only row; this invocation reports a
+            # suppressed outcome without attempting GitHub work.
+            return {"id": None, "source": source, "repository": repository,
+                    "status": "completed", "result": "suppressed", "error": None,
+                    "scan_id": None, "pack_id": None, "started_at": now,
+                    "finished_at": now, "scheduled_for": scheduled_for}
         if not self.store.acquire_lease(self.owner,operation_id,now,iso(moment+timedelta(seconds=self.lease_seconds))):
             self.store.finish_operation(operation_id,"suppressed",now)
             return self.store.operation(operation_id)

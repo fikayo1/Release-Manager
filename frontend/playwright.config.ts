@@ -22,12 +22,16 @@ export default defineConfig({
         '../.venv/bin/uvicorn tests.e2e_app:app --app-dir .. --host 127.0.0.1 --port 18000'),
       url: `${apiURL}/health`,
       reuseExistingServer: false,
+      env: { CRON_SECRET: 'cron-fixed-browser-test-secret' },
     },
     {
       command: logged(FRONTEND_LOG, 'npm run dev -- --hostname 127.0.0.1 --port 13000'),
       url: webURL,
       reuseExistingServer: false,
-      env: { RELEASE_MANAGER_API_URL: apiURL },
+      env: {
+        RELEASE_MANAGER_API_URL: apiURL,
+        CRON_SECRET: 'cron-fixed-browser-test-secret',
+      },
     },
   ],
   use: { baseURL: webURL, launchOptions: { executablePath } },

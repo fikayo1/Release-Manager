@@ -1,0 +1,17 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "buildCommand": "npm --prefix frontend run build",
+  "installCommand": "npm --prefix frontend ci",
+  "outputDirectory": "frontend/.next",
+  "functions": {
+    "api/index.py": { "runtime": "@vercel/python@4.3.0", "maxDuration": 60 }
+  },
+  "rewrites": [
+    { "source": "/health", "destination": "/api/index" },
+    { "source": "/_api/:path*", "destination": "/api/index" }
+  ],
+  "crons": [
+    { "path": "/api/cron/scheduler", "schedule": "*/5 * * * *" }
+  ]
+}

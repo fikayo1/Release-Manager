@@ -61,8 +61,9 @@ JOURNAL = Journal()
 class FakeOAuth(OAuthService):
     """Deterministic token exchange; authorization stays on the local fixture."""
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, authorize_origin=None, **kwargs):
         super().__init__(*args, **kwargs)
+        self.authorize_origin = authorize_origin
 
         def exchange(code):
             JOURNAL.record("token_exchange", detail="accepted" if code == ACCEPTED_CODE else "rejected")
@@ -73,9 +74,9 @@ class FakeOAuth(OAuthService):
     def begin(self, session_id=None):
         url, cookie = super().begin(session_id)
         JOURNAL.record("authorize", detail="oauth begin")
-        # Keep authorization on whichever backend origin owns this callback so a
-        # second fixture process (C3 restart) round-trips to itself, not :18000.
-        origin = self.callback_url.rsplit("/auth/github/callback", 1)[0]
+        # The callback may be on the web origin while the deterministic fake
+        # authorization endpoint remains on the API fixture origin.
+        origin = self.authorize_origin or self.callback_url.rsplit("/auth/github/callback", 1)[0]
         return f"{origin}/test/github/authorize?" + urlparse(url).query, cookie
 
 

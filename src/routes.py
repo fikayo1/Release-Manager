@@ -12,6 +12,8 @@ from .phases import approve, draft, publish, reconcile, reject, scan
 from .store import StateError
 from .cron import CronError
 from .operations import OperationRunner
+from .scheduler import Scheduler
+from .cron_auth import authorize_cron
 from .github_client import GitHubAccountClient, GitHubRevokedError
 from .github_oauth import OAuthError
 
@@ -320,3 +322,23 @@ def reconcile_pack(pack_id: str, request: Request):
 @router.get("/api/audit")
 def audit(request: Request):
     return deps(request)[0].audit()
+
+
+@router.post("/scheduler/tick")
+async def scheduler_tick(request: Request):
+    """Serverless replacement for the always-on polling loop.
+
+    Does work only when the request carries both a valid ``CRON_SECRET`` bearer
+    token and the Vercel Cron header. Idempotency, lease ownership, and
+    duplicate-work suppression come from the durable scheduled-slot logic.
+    """
+    store = request.app.state.store
+    settings = getattr(request.app.state, "settings", None)
+    if not settings or not getattr(settings, "cron_secret", ""):
+        raise HTTPException(503, "scheduler tick is not configured")
+    if not authorize_cron(request.headers, settings):
+        raise HTTPException(403, "cron authorization required")
+    runner = OperationRunner(store, request.app.state.github,
+                             client_provider=getattr(request.app.state, "github_provider", None))
+    outcome = await Scheduler(store, runner).tick()
+    return outcome

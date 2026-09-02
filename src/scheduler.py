@@ -20,14 +20,19 @@ class Scheduler:
         with self.store.connect() as db:
             db.execute("UPDATE scheduler_state SET heartbeat_at=? WHERE id=1",(heartbeat.isoformat(),))
         schedule=self.store.schedule()
-        if not schedule["enabled"] or not matches(schedule["expression"],current): return
+        if not schedule["enabled"] or not matches(schedule["expression"],current):
+            return {"slot": slot, "ran": False, "reason": "not_due"}
         # The operation's durable scheduled_for slot is the claim. Marking a
         # slot only after the operation exists means a crash before creation is
         # retried after restart, while a completed operation is never duplicated.
-        if not any(item["source"] == "scheduled" and item["scheduled_for"] == slot for item in self.store.operations()):
-            result=await asyncio.to_thread(self.runner.run,"scheduled",slot)
+        if any(item["source"] == "scheduled" and item["scheduled_for"] == slot for item in self.store.operations()):
+            return {"slot": slot, "ran": False, "reason": "already_claimed"}
+        result=await asyncio.to_thread(self.runner.run,"scheduled",slot)
+        if result.get("id"):
             with self.store.connect() as db:
-                db.execute("UPDATE scheduler_state SET last_slot=?,last_operation_id=?,last_run_at=?,last_result=?,last_error=? WHERE id=1",(slot,result["id"],heartbeat.isoformat(),result["result"],result["error"]))
+                db.execute("UPDATE scheduler_state SET last_slot=?,last_operation_id=?,last_run_at=?,last_result=?,last_error=? WHERE id=1",(slot,result["id"],heartbeat.isoformat(),result["result"],result.get("error")))
+        return {"slot": slot, "ran": True, "result": result.get("result"),
+                "operation_id": result.get("id"), "repository": result.get("repository")}
     async def loop(self):
         while True:
             try:
