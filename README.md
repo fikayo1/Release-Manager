@@ -22,13 +22,13 @@ The singleton schedule has five cron fields and runs in UTC. Standalone FastAPI 
 
 ## Deploy to Vercel
 
-This repository is configured as one Vercel project by `vercel.json`: Next.js builds from `frontend/`, while `api/index.py` exposes FastAPI with its background scheduler disabled. Vercel Cron calls `/api/cron/scheduler`, whose server-side route verifies both the bearer secret and Vercel cron marker before forwarding to `POST /scheduler/tick`. Do not run a separate always-on worker.
+This repository is configured as one Vercel project by `vercel.json`: Next.js builds from `frontend/`, while `api/index.py` exposes FastAPI with its background scheduler disabled. Vercel Cron sends `GET /api/cron/scheduler` with `Authorization: Bearer <CRON_SECRET>` and its documented `User-Agent: vercel-cron/1.0`; that server-side route verifies both values before forwarding an authenticated `POST /scheduler/tick` to FastAPI. Do not run a separate always-on worker.
 
 1. Import the repository into Vercel using the Next.js framework preset. The configured install/build commands are `npm --prefix frontend ci` and `npm --prefix frontend run build`; the root `requirements.txt` supplies Python dependencies.
 2. Provision a Vercel-compatible managed Postgres database and set `DATABASE_URL` or `POSTGRES_URL`. Production starts empty; there is no SQLite-to-Postgres import. Reconnect GitHub and select a repository after cutover.
 3. Set `RELEASE_MANAGER_WEB_URL=https://<production-domain>`, server-only `RELEASE_MANAGER_API_URL=https://<production-domain>/_api`, `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, `GITHUB_OAUTH_CALLBACK_URL=https://<production-domain>/auth/github/callback`, `SESSION_SECRET`, and `CRON_SECRET`. `.env.example` documents all names. Never put the client secret, session secret, cron secret, database URL, internal API URL, or GitHub token in a `NEXT_PUBLIC_` variable.
 4. In the GitHub OAuth App set Homepage URL to `https://<production-domain>` and Authorization callback URL to `https://<production-domain>/auth/github/callback`.
-5. Keep the cron declaration in `vercel.json` and configure `CRON_SECRET` in Vercel. The application additionally requires the `x-vercel-cron` marker (overridable with `VERCEL_CRON_HEADER`).
+5. Keep the cron declaration in `vercel.json` and configure `CRON_SECRET` in Vercel. No custom cron header is needed: Vercel invokes the path with `GET`, adds `Authorization: Bearer <CRON_SECRET>`, and identifies the invocation with `User-Agent: vercel-cron/1.0`. The public cron URL is **https://<production-domain>/api/cron/scheduler**; opening it normally is expected to return 401.
 6. Configure an uptime/readiness probe for **https://<production-domain>/health**, which returns `{"status":"ok"}`. Data migrations run during application startup; a database failure causes startup/request failure rather than reporting data-layer readiness.
 7. Keep the configured function duration above the outbound GitHub client's 20-second timeout. Serverless instances are stateless and concurrent; Postgres is the sole production persistence layer.
 

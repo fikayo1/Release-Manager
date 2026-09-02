@@ -11,10 +11,10 @@ test('cron proxy rejects missing proof without backend work', async ({request}) 
   expect(journal.entries).toEqual([]);
 });
 
-test('authorized cron calls the serverless tick idempotently', async ({request}) => {
-  const headers = {authorization: `Bearer ${SECRET}`, 'x-vercel-cron': '1'};
-  const first = await request.post('/api/cron/scheduler', {headers});
-  const second = await request.post('/api/cron/scheduler', {headers});
+test('a Vercel GET cron invocation calls the serverless tick idempotently', async ({request}) => {
+  const headers = {authorization: `Bearer ${SECRET}`, 'user-agent': 'vercel-cron/1.0'};
+  const first = await request.get('/api/cron/scheduler', {headers});
+  const second = await request.get('/api/cron/scheduler', {headers});
   expect(first.ok()).toBeTruthy();
   expect(second.ok()).toBeTruthy();
   const operations = await (await request.get(`${API}/api/operations`)).json();
