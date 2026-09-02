@@ -1,102 +1,53 @@
-"""Deterministic OAuth and multi-repository GitHub double for browser tests."""
+"""Deterministic OAuth + multi-repository GitHub fixture for browser tests.
+
+Started only by Playwright. All GitHub behaviour comes from ``tests.fakes`` so
+the browser suite and the backend suites share one set of doubles and one token
+canary. The operator database is a real on-disk SQLite file; it is reset on
+startup unless ``E2E_KEEP_DB=1`` (set by the restart helper so a respawned
+process keeps the data the previous process wrote).
+"""
+import asyncio
 import os
+from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import parse_qs, urlencode, urlparse
+from urllib.parse import urlencode
 
 from fastapi import Request
 from fastapi.responses import RedirectResponse
+from pydantic import BaseModel
 
 from src.app import create_app
 from src.config import Settings
-from src.github_client import GitHubAccountClient
-from src.github_oauth import OAuthService
-from src.models import Evidence, Release, Repository
+from src.operations import OperationRunner
+from src.scheduler import Scheduler
+from tests.fakes import (
+    JOURNAL,
+    PUBLISHED,
+    REPO_A,
+    FakeAccountGitHub,
+    FakeOAuth,
+    FakeRepositoryGitHub,
+    seed_pack,
+)
+
+PORT = os.getenv("E2E_API_PORT", "18000")
+API_ORIGIN = f"http://127.0.0.1:{PORT}"
+CALLBACK = f"{API_ORIGIN}/auth/github/callback"
+WEB = "http://127.0.0.1:13000"
 
 DB = os.getenv("E2E_DB", "/tmp/release-manager-e2e.db")
-Path(DB).unlink(missing_ok=True)
-CALLBACK = "http://127.0.0.1:18000/auth/github/callback"
-WEB = "http://127.0.0.1:13000"
-PUBLISHED: list[dict] = []
+if os.getenv("E2E_KEEP_DB") != "1":
+    Path(DB).unlink(missing_ok=True)
 
-
-class TestOAuth(OAuthService):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.token_request = lambda code: {"access_token": "browser-test-token"} if code == "accepted" else {}
-
-    def begin(self, session_id=None):
-        url, cookie = super().begin(session_id)
-        query = urlparse(url).query
-        return "http://127.0.0.1:18000/test/github/authorize?" + query, cookie
-
-
-class GitHubResponse:
-    def __init__(self, payload, link=""):
-        self.status_code = 200
-        self.headers = {"Link": link} if link else {}
-        self._payload = payload
-
-    def json(self):
-        return self._payload
-
-
-def account_github_transport(method, url, **kwargs):
-    """Two actual REST pages, so browser tests cross the production paginator."""
-    assert method == "GET"
-    assert kwargs["headers"]["Authorization"] == "Bearer browser-test-token"
-    if url == "https://api.github.com/user":
-        return GitHubResponse({"login": "oauth-fixture", "id": 42})
-    if url == "https://api.github.com/user/repos":
-        return GitHubResponse([
-            {"full_name": "fixture/repository-a", "private": True,
-             "html_url": "https://example.test/a", "default_branch": "main"},
-        ], '<https://api.github.test/user/repos?page=2>; rel="next"')
-    if url == "https://api.github.test/user/repos?page=2":
-        # The production client must not resend first-page query parameters here.
-        assert kwargs.get("params") == {}
-        return GitHubResponse([
-            {"full_name": "fixture/repository-b", "private": False,
-             "html_url": "https://example.test/b", "default_branch": "main"},
-        ])
-    raise AssertionError(f"unexpected GitHub URL: {url}")
-
-
-class AccountGitHub(GitHubAccountClient):
-    def __init__(self, token):
-        super().__init__(token, request=account_github_transport)
-
-
-class RepositoryGitHub:
-    def __init__(self, owner, repo, token):
-        assert token == "browser-test-token"
-        self.owner, self.repo = owner, repo
-
-    def repository(self):
-        return Repository("main", "2025-01-01T00:00:00+00:00", f"https://example.test/{self.repo}")
-
-    def latest_release(self):
-        return Release("v1.0.0", "Release v1.0.0", "Initial", "2025-01-01T00:00:00+00:00", "https://example.test/v1")
-
-    def commits_since(self, *args):
-        return (Evidence(f"commit-{self.repo}", "commit", f"feat: add deterministic dashboard to {self.repo}", "fixture-user", "2025-01-02T00:00:00+00:00", f"https://example.test/{self.repo}/commit/1", sha="abc123"),)
-
-    def merged_pulls_since(self, *args):
-        return ()
-
-    def create_release(self, tag, title, body):
-        PUBLISHED.append({"repository": f"{self.owner}/{self.repo}", "tag": tag})
-        return Release(tag, title, body, "2025-01-03T00:00:00+00:00", f"https://example.test/{self.repo}/releases/{tag}")
-
-    def release_for_tag(self, tag):
-        return None
-
-
+# A high interval keeps the lifespan scheduler from firing scans on its own:
+# scheduled scans in the acceptance suite are driven deterministically through
+# ``/test/scheduler/tick`` below.
 app = create_app(
-    Settings(database=DB, scheduler_interval=0.05, oauth_client_id="fixture-client",
+    Settings(database=DB, scheduler_interval=3600, oauth_client_id="fixture-client",
              oauth_client_secret="fixture-secret", oauth_callback_url=CALLBACK,
              session_secret="deterministic-browser-session-secret", web_url=WEB),
-    validate=False, oauth_service_factory=TestOAuth,
-    account_client_factory=AccountGitHub, github_client_factory=RepositoryGitHub,
+    validate=False, oauth_service_factory=FakeOAuth,
+    account_client_factory=FakeAccountGitHub, github_client_factory=FakeRepositoryGitHub,
 )
 
 
@@ -110,3 +61,37 @@ def authorize(request: Request, state: str, error: str = ""):
 @app.get("/test/publications")
 def publications():
     return PUBLISHED
+
+
+@app.get("/test/github/journal")
+def github_journal():
+    return {"entries": JOURNAL.entries(), "repositories": JOURNAL.repositories()}
+
+
+@app.post("/test/github/journal/reset")
+def github_journal_reset():
+    JOURNAL.reset()
+    return {"ok": True}
+
+
+class SeedRequest(BaseModel):
+    pack_id: str
+    repository: str = REPO_A
+    status: str = "pending"
+    tag: str | None = None
+
+
+@app.post("/test/seed")
+def seed(request: Request, body: SeedRequest):
+    seed_pack(request.app.state.store, body.pack_id, body.repository, body.status, tag=body.tag)
+    return {"pack_id": body.pack_id, "repository": body.repository, "status": body.status}
+
+
+@app.post("/test/scheduler/tick")
+async def scheduler_tick(request: Request):
+    """Drive the real ``Scheduler.tick`` once against a deterministically due slot."""
+    store = request.app.state.store
+    fixed = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
+    runner = OperationRunner(store, None, client_provider=request.app.state.github_provider, clock=lambda: fixed)
+    await Scheduler(store, runner, clock=lambda: fixed).tick()
+    return {"slot": fixed.replace(second=0, microsecond=0).isoformat()}

@@ -20,6 +20,14 @@ and publishing to authorized private repositories. A revoked token requires
 reconnection. Selection is durable, and each scan records its repository so a
 later selection change cannot retarget an existing release.
 
+The selected repository is captured on each `Scan` when the scan starts and is
+persisted in the operator SQLite database, so it survives a backend restart on
+the same `RELEASE_MANAGER_DB` file and a later selection change never retargets
+existing work: reconcile, rollback/reject, approval, and publication for a pack
+always resolve credentials against that pack's scan-captured repository, while
+only the next manual scan and the next due scheduled scan follow the new
+selection.
+
 For non-interactive legacy automation only, the complete `GITHUB_OWNER`,
 `GITHUB_REPO`, and `GITHUB_TOKEN` triple may replace all OAuth/session settings.
 Partial legacy configuration is rejected.

@@ -34,3 +34,19 @@ npm --prefix frontend test
 npm --prefix frontend run test:e2e
 npm --prefix frontend run build
 ```
+
+Acceptance runs entirely offline. `tests/fakes.py` holds the deterministic OAuth
+and GitHub doubles shared by the pytest suites and the Playwright fixture
+(`tests/e2e_app.py`): a fake authorization/token exchange, two REST pages listing
+`fixture/repository-a` and `fixture/repository-b`, a repository-aware scan/release
+double, and a single distinctive access-token canary (`CANARY_TOKEN`). Every
+double call is appended to a request journal exposed at `GET /test/github/journal`
+(`POST /test/github/journal/reset` clears it); `POST /test/seed` inserts
+A-targeted work and `POST /test/scheduler/tick` drives one due scheduled slot.
+The Playwright `webServer` commands are wrapped by `frontend/e2e/support/run-logged.mjs`
+so a spec can assert the canary never reaches `frontend/e2e/.logs/`. The e2e
+fixture uses a real on-disk operator database at `E2E_DB` (default
+`/tmp/release-manager-e2e.db`) and only resets it on startup unless
+`E2E_KEEP_DB=1`, so the C3 restart helper (`frontend/e2e/support/backend.ts`) can
+kill and respawn `uvicorn` against the same file and confirm the selected
+repository survives.

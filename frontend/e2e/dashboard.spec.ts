@@ -21,47 +21,31 @@ test.describe.serial('operator workflow', () => {
     await expect(page.getByText('The authorization request expired or was invalid. Try again.')).toBeVisible();
   });
 
-  test('OAuth state, paginated repository authorization, persistence, and release targeting', async ({page}) => {
-    const seen: string[] = [];
-    page.on('request', request => {
-      if(request.url().includes('/test/github/authorize')) seen.push(new URL(request.url()).searchParams.get('state') || '');
-    });
+  // OAuth containment (C1/C2), persistence across restart (C3), and A/B scan
+  // targeting (C4-C6) have dedicated specs (oauth.spec.ts,
+  // repository-targeting.spec.ts). This keeps only a connect + select smoke.
+  test('OAuth connects, lists paginated repositories, and persists a selection', async ({page}) => {
     await page.goto('/settings/github');
     await page.getByRole('link', {name:'Continue with GitHub'}).click();
     await expect(page).toHaveURL(/settings\/github\?github=connected/);
     await expect(page.getByText('Connected as')).toBeVisible();
-    expect(seen[0]).toBeTruthy();
+    await expect(page.getByLabel('Repository').locator('option'))
+      .toContainText(['Select a repository', 'fixture/repository-a (private)', 'fixture/repository-b']);
 
-    // A consumed state cannot be replayed, and a fresh denial is explicit.
-    await page.goto(`http://127.0.0.1:18000/auth/github/callback?state=${seen[0]}&code=accepted`);
-    await expect(page).toHaveURL(/github=invalid_state/);
-    const fresh = await page.request.get('http://127.0.0.1:18000/auth/github', {maxRedirects:0});
-    const denial = new URL(fresh.headers().location); denial.searchParams.set('error','1');
-    await page.goto(denial.toString());
-    await expect(page).toHaveURL(/github=denied/);
-
-    await page.getByLabel('Repository').selectOption('fixture/repository-a');
-    await page.getByRole('button', {name:'Save repository'}).click();
+    // Re-select until the client form has hydrated enough to enable Save.
+    const save = page.getByRole('button', {name:'Save repository'});
+    await expect(async () => {
+      await page.getByLabel('Repository').selectOption('fixture/repository-a');
+      await expect(save).toBeEnabled({timeout: 1000});
+    }).toPass();
+    await save.click();
     await expect(page.getByRole('status')).toContainText('Saved fixture/repository-a');
     await page.reload();
     await expect(page.getByLabel('Repository')).toHaveValue('fixture/repository-a');
-    const forbidden = await page.request.put('http://127.0.0.1:18000/api/github/repository', {data:{full_name:'other/secret'}});
-    expect(forbidden.status()).toBe(422);
 
     await page.goto('/');
     await page.getByRole('button', {name:'Scan now'}).click();
     await expect(page.getByRole('status')).toContainText('draft_created');
-    await page.goto('/settings/github');
-    await page.getByLabel('Repository').selectOption('fixture/repository-b');
-    await page.getByRole('button', {name:'Save repository'}).click();
-    await page.goto('/releases');
-    await page.locator('tbody a').first().click();
-    await page.getByLabel('Actor').fill('oauth-reviewer');
-    await page.getByLabel('Reason').fill('Repository target verified');
-    await page.getByRole('button', {name:'Approve and publish'}).click();
-    await expect(page.getByText('published', {exact:true})).toBeVisible();
-    const publications = await (await page.request.get('http://127.0.0.1:18000/test/publications')).json();
-    expect(publications.at(-1).repository).toBe('fixture/repository-a');
   });
 
   test('desktop navigation is read-only and manual scan creates a draft', async ({page}) => {

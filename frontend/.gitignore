@@ -1,0 +1,4 @@
+# Captured webServer logs and scratch operator databases from the e2e suite.
+e2e/.logs/
+e2e/.tmp/
+*.db
