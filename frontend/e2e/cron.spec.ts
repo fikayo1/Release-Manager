@@ -7,6 +7,9 @@ test('cron proxy rejects missing proof without backend work', async ({request}) 
   await request.post(`${API}/test/github/journal/reset`);
   expect((await request.post('/api/cron/scheduler')).status()).toBe(401);
   expect((await request.post('/api/cron/scheduler', {headers: {authorization: `Bearer ${SECRET}`}})).status()).toBe(401);
+  expect((await request.post('/api/cron/scheduler', {
+    headers: {authorization: `Bearer ${SECRET}`, 'x-vercel-cron': 'arbitrary-marker'},
+  })).status()).toBe(401);
   const journal = await (await request.get(`${API}/test/github/journal`)).json();
   expect(journal.entries).toEqual([]);
 });

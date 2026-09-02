@@ -13,9 +13,8 @@ function equal(left: string, right: string): boolean {
  * Handle the GET request issued by Vercel Cron.
  *
  * Vercel supplies the configured CRON_SECRET as a bearer token and identifies
- * scheduled invocations with User-Agent: vercel-cron/1.0. The legacy marker is
- * retained for local/backwards-compatible callers, but is not required from
- * Vercel itself.
+ * scheduled invocations with User-Agent: vercel-cron/1.0. Do not accept a
+ * caller-controlled substitute header here: this is the public boundary.
  */
 async function handleCron(request: NextRequest) {
   const secret = process.env.CRON_SECRET ?? '';
@@ -24,9 +23,7 @@ async function handleCron(request: NextRequest) {
     request.headers.get('user-agent')?.trim().toLowerCase() ?? '',
     VERCEL_CRON_USER_AGENT,
   );
-  const legacyInvocation = Boolean(request.headers.get('x-vercel-cron'));
-
-  if (!secret || (!vercelInvocation && !legacyInvocation) || !equal(authorization, `Bearer ${secret}`)) {
+  if (!secret || !vercelInvocation || !equal(authorization, `Bearer ${secret}`)) {
     return NextResponse.json({detail: 'unauthorized'}, {status: 401});
   }
 
