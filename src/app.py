@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from .config import Settings
 from .github_client import GitHubClient
+from .github_oauth import OAuthService
 from .routes import router
 from .store import Store
 from .operations import OperationRunner
@@ -21,12 +22,23 @@ def create_app(settings:Settings|None=None, github=None, validate:bool=True) -> 
         cfg=settings or Settings.from_env()
         if not hasattr(app.state, "store"):
             app.state.store=Store(cfg.database)
-            app.state.github=github or GitHubClient(cfg.owner,cfg.repo,cfg.token)
-        if validate:
-            app.state.github.repository()  # fail loud before serving
+            app.state.settings=cfg
+            app.state.github=github or (GitHubClient(cfg.owner,cfg.repo,cfg.token) if cfg.legacy else None)
+            if cfg.interactive:
+                app.state.oauth=OAuthService(app.state.store,cfg.oauth_client_id,cfg.oauth_client_secret,
+                    cfg.oauth_callback_url,cfg.session_secret,cfg.secure_cookie)
+                def provider(slug):
+                    credentials=app.state.store.github_credentials()
+                    if not credentials or credentials["status"] != "connected":
+                        raise RuntimeError("GitHub connection requires reconnect")
+                    owner, repo = slug.split("/", 1)
+                    return GitHubClient(owner,repo,credentials["access_token"])
+                app.state.github_provider=provider
+        if validate and cfg.legacy:
+            app.state.github.repository()  # fail loud before serving in legacy mode
         scheduler=Scheduler(
             app.state.store,
-            OperationRunner(app.state.store, app.state.github),
+            OperationRunner(app.state.store, app.state.github, client_provider=getattr(app.state,"github_provider",None)),
             interval=cfg.scheduler_interval,
         )
         app.state.scheduler=scheduler

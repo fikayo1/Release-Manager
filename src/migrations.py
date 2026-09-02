@@ -20,6 +20,15 @@ INSERT OR IGNORE INTO scheduler_state(id) VALUES(1);
 ALTER TABLE scheduler_state ADD COLUMN last_run_at TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS scheduled_operation_slot
   ON operations(scheduled_for) WHERE source='scheduled' AND scheduled_for IS NOT NULL;
+"""), (3, """
+CREATE TABLE IF NOT EXISTS github_connection(
+ id INTEGER PRIMARY KEY CHECK(id=1), login TEXT NOT NULL, account_id TEXT,
+ access_token TEXT NOT NULL, refresh_token TEXT, expires_at TEXT,
+ selected_repository TEXT, status TEXT NOT NULL DEFAULT 'connected', updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS oauth_states(
+ state_digest TEXT PRIMARY KEY, session_id TEXT NOT NULL, created_at TEXT NOT NULL,
+ expires_at TEXT NOT NULL, consumed_at TEXT);
+CREATE INDEX IF NOT EXISTS oauth_states_expiry ON oauth_states(expires_at);
 """))
 
 

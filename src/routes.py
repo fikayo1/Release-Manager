@@ -1,6 +1,6 @@
 """Operator JSON API and progressively enhanced server-rendered review UI."""
 from datetime import datetime, timezone
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlencode
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
@@ -12,6 +12,8 @@ from .phases import approve, draft, publish, reconcile, reject, scan
 from .store import StateError
 from .cron import CronError
 from .operations import OperationRunner
+from .github_client import GitHubAccountClient, GitHubRevokedError
+from .github_oauth import OAuthError
 
 router = APIRouter()
 templates = Templates()
@@ -32,6 +34,9 @@ class Decision(BaseModel):
 class ScheduleUpdate(BaseModel):
     expression: str
     enabled: bool
+
+class RepositorySelection(BaseModel):
+    full_name: str
 
 
 def _detail_context(request, pack_id, error=None, values=None):
@@ -129,10 +134,78 @@ async def review_decision(pack_id: str, decision: str, request: Request):
     return RedirectResponse(request.url_for("review_detail", pack_id=pack_id), status_code=303)
 
 
+@router.get("/auth/github")
+def github_start(request: Request):
+    oauth = getattr(request.app.state, "oauth", None)
+    if not oauth: raise HTTPException(503, "GitHub OAuth is not configured")
+    session = oauth.read_session(request.cookies.get(oauth.cookie_name))
+    url, cookie = oauth.begin(session)
+    response = RedirectResponse(url, 302)
+    response.set_cookie(oauth.cookie_name, cookie, httponly=True, secure=oauth.secure_cookie,
+                        samesite="lax", path="/", max_age=86400)
+    return response
+
+@router.get("/auth/github/callback")
+def github_callback(request: Request, state: str = "", code: str = "", error: str = ""):
+    oauth = getattr(request.app.state, "oauth", None)
+    settings = getattr(request.app.state, "settings", None)
+    if not oauth or not settings: raise HTTPException(503, "GitHub OAuth is not configured")
+    status = "connected"
+    try:
+        oauth.consume(state, request.cookies.get(oauth.cookie_name))
+        if error:
+            raise OAuthError("GitHub authorization was denied")
+        token, refresh, expires = oauth.exchange(code)
+        account = GitHubAccountClient(token).user()
+        expires_at = None
+        if expires:
+            from datetime import timedelta
+            expires_at = (datetime.now(timezone.utc) + timedelta(seconds=int(expires))).isoformat()
+        request.app.state.store.save_github_connection(account["login"], account.get("id"), token,
+                                                        refresh, expires_at, now())
+    except OAuthError as exc:
+        status = "denied" if error else "invalid_state"
+    except Exception:
+        status = "exchange_failed"
+    destination = settings.web_url.rstrip("/") + "/settings/github?" + urlencode({"github": status})
+    return RedirectResponse(destination, 303)
+
+@router.get("/api/github")
+def github_settings(request: Request):
+    store = request.app.state.store
+    connection = store.github_connection()
+    result = {"status": connection["status"] if connection else "disconnected",
+              "account": connection["login"] if connection else None,
+              "selected_repository": connection["selected_repository"] if connection else None,
+              "repositories": [], "authorize_url": "/auth/github"}
+    if connection and connection["status"] == "connected":
+        credentials = store.github_credentials()
+        try:
+            result["repositories"] = GitHubAccountClient(credentials["access_token"]).repositories()
+        except GitHubRevokedError:
+            store.mark_github_revoked(now()); result["status"] = "revoked"
+    return result
+
+@router.put("/api/github/repository")
+def choose_repository(data: RepositorySelection, request: Request):
+    if data.full_name.count("/") != 1 or any(not p for p in data.full_name.split("/")):
+        raise HTTPException(422, "Select a valid authorized repository")
+    store = request.app.state.store; credentials = store.github_credentials()
+    if not credentials or credentials["status"] != "connected":
+        raise HTTPException(409, "Reconnect GitHub before selecting a repository")
+    try:
+        allowed = {r["full_name"] for r in GitHubAccountClient(credentials["access_token"]).repositories()}
+    except GitHubRevokedError:
+        store.mark_github_revoked(now()); raise HTTPException(409, "Reconnect GitHub before selecting a repository")
+    if data.full_name not in allowed:
+        raise HTTPException(422, "Repository is not authorized or accessible")
+    store.select_repository(data.full_name, now())
+    return {"selected_repository": data.full_name}
+
 @router.post("/api/scans", status_code=201)
 def start(request: Request):
     store, gh = deps(request)
-    return OperationRunner(store, gh).run("manual")
+    return OperationRunner(store, gh, client_provider=getattr(request.app.state,"github_provider",None)).run("manual")
 
 @router.get("/api/operations")
 def list_operations(request: Request):

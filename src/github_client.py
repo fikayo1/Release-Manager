@@ -41,6 +41,60 @@ class GitHubTransportError(GitHubError):
     pass
 
 
+class GitHubRevokedError(GitHubError):
+    pass
+
+
+class GitHubAccountClient:
+    """Account-level API used only by the backend settings boundary."""
+    def __init__(self, token: str, request: Callable[..., Any] = _stdlib_request):
+        self._token, self._request = token, request
+
+    def __repr__(self):
+        return "GitHubAccountClient(token='***')"
+
+    def _get(self, url, params=None):
+        headers = {"Authorization": f"Bearer {self._token}", "Accept": "application/vnd.github+json",
+                   "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "release-manager/1"}
+        try:
+            response = self._request("GET", url, headers=headers, timeout=20, params=params or {})
+        except Exception as exc:
+            raise GitHubTransportError("GitHub transport failed") from exc
+        if response.status_code == 401:
+            raise GitHubRevokedError("GitHub connection requires reconnect", 401)
+        if response.status_code >= 400:
+            raise GitHubError(f"GitHub returned HTTP {response.status_code}", response.status_code)
+        try:
+            return response, response.json()
+        except Exception as exc:
+            raise GitHubError("GitHub returned malformed JSON") from exc
+
+    def user(self):
+        _, data = self._get("https://api.github.com/user")
+        if not isinstance(data, dict) or not data.get("login"):
+            raise GitHubError("GitHub returned a malformed user response")
+        return {"login": data["login"], "id": data.get("id")}
+
+    def repositories(self):
+        url = "https://api.github.com/user/repos"; params = {"visibility": "all", "affiliation": "owner,collaborator,organization_member", "per_page": 100}
+        result = []
+        while url:
+            response, data = self._get(url, params)
+            if not isinstance(data, list):
+                raise GitHubError("GitHub returned a malformed repository response")
+            for item in data:
+                try:
+                    result.append({"full_name": item["full_name"], "private": bool(item["private"]),
+                                   "html_url": item["html_url"], "default_branch": item.get("default_branch")})
+                except (KeyError, TypeError) as exc:
+                    raise GitHubError("GitHub returned a malformed repository response") from exc
+            url, params = "", {}
+            for part in response.headers.get("Link", "").split(","):
+                if 'rel="next"' in part:
+                    url = part.split(";")[0].strip()[1:-1]
+        return result
+
+
 class GitHubClient:
     def __init__(self, owner: str, repo: str, token: str, request: Callable[..., Any] = _stdlib_request):
         self.owner, self.repo, self._token, self._request = owner, repo, token, request

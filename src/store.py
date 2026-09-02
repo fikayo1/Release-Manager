@@ -37,6 +37,50 @@ class Store:
             )
             migrate(db)
 
+    def create_oauth_state(self, digest, session_id, created_at, expires_at):
+        with self.connect() as db:
+            db.execute("DELETE FROM oauth_states WHERE expires_at<?", (created_at,))
+            db.execute("INSERT INTO oauth_states VALUES(?,?,?,?,NULL)",
+                       (digest, session_id, created_at, expires_at))
+
+    def consume_oauth_state(self, digest, session_id, consumed_at):
+        with self.connect() as db:
+            return db.execute(
+                "UPDATE oauth_states SET consumed_at=? WHERE state_digest=? AND session_id=? AND consumed_at IS NULL AND expires_at>=?",
+                (consumed_at, digest, session_id, consumed_at),
+            ).rowcount == 1
+
+    def save_github_connection(self, login, account_id, access_token, refresh_token, expires_at, now):
+        with self.connect() as db:
+            previous = db.execute("SELECT selected_repository FROM github_connection WHERE id=1").fetchone()
+            selected = previous["selected_repository"] if previous else None
+            db.execute("""INSERT INTO github_connection VALUES(1,?,?,?,?,?,?,'connected',?)
+                ON CONFLICT(id) DO UPDATE SET login=excluded.login,account_id=excluded.account_id,
+                access_token=excluded.access_token,refresh_token=excluded.refresh_token,
+                expires_at=excluded.expires_at,status='connected',updated_at=excluded.updated_at""",
+                (login, str(account_id) if account_id is not None else None, access_token,
+                 refresh_token, expires_at, selected, now))
+
+    def github_credentials(self):
+        with self.connect() as db:
+            row = db.execute("SELECT access_token,refresh_token,expires_at,status FROM github_connection WHERE id=1").fetchone()
+            return dict(row) if row else None
+
+    def github_connection(self):
+        """Safe browser-facing connection data (credential columns excluded)."""
+        with self.connect() as db:
+            row = db.execute("SELECT login,account_id,selected_repository,status,updated_at FROM github_connection WHERE id=1").fetchone()
+            return dict(row) if row else None
+
+    def mark_github_revoked(self, now):
+        with self.connect() as db:
+            db.execute("UPDATE github_connection SET status='revoked',updated_at=? WHERE id=1", (now,))
+
+    def select_repository(self, full_name, now):
+        with self.connect() as db:
+            if db.execute("UPDATE github_connection SET selected_repository=?,updated_at=? WHERE id=1 AND status='connected'", (full_name, now)).rowcount != 1:
+                raise StateError("GitHub connection requires reconnect")
+
     def event(self, db, kind, subject, now, detail=None, actor=None):
         db.execute(
             "INSERT INTO audit(kind,subject_id,actor,detail,created_at) VALUES(?,?,?,?,?)",
