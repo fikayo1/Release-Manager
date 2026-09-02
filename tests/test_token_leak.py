@@ -38,7 +38,7 @@ def client(tmp_path, journal):
         yield c
 
 
-def test_secrets_never_reach_a_client_surface(client):
+def test_secrets_never_reach_a_client_surface_or_backend_logs(client, caplog, capsys):
     complete_oauth(client)
     client.put("/api/github/repository", json={"full_name": REPO_A})
     client.post("/api/scans")
@@ -56,6 +56,12 @@ def test_secrets_never_reach_a_client_surface(client):
         haystack = response.text + "\n" + "\n".join(response.headers.values())
         for secret in SECRETS:
             assert secret not in haystack
+    # Deterministically inspect Python logging and both process streams after
+    # exercising OAuth, repository, scan, error, and cron paths.
+    captured = capsys.readouterr()
+    backend_output = caplog.text + captured.out + captured.err
+    for secret in SECRETS:
+        assert secret not in backend_output
 
 
 def test_reprs_and_errors_redact_secrets(client, tmp_path):

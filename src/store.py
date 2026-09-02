@@ -280,6 +280,28 @@ class Store:
             db.execute("INSERT INTO operations(id,source,repository,status,started_at,scheduled_for) VALUES(?,?,?,'running',?,?)", (oid,source,repository,now,scheduled_for))
             self.event(db,"operation_started",oid,now,{"source":source,"repository":repository})
 
+    def record_suppressed_operation(self, source, repository, now, scheduled_for=None, reason="duplicate_slot"):
+        """Durably audit an invocation suppressed before a new operation row.
+
+        Scheduled slots deliberately have one canonical operation row. Duplicate
+        requests are attached to that row as audit receipts, preserving both the
+        uniqueness guarantee and evidence that every invocation was handled.
+        """
+        with self.connect() as db:
+            if source == "scheduled" and scheduled_for:
+                row = db.execute(
+                    "SELECT id FROM operations WHERE source='scheduled' AND scheduled_for=?",
+                    (scheduled_for,),
+                ).fetchone()
+            else:
+                row = None
+            subject = row["id"] if row else f"suppressed:{source}:{scheduled_for or now}"
+            self.event(db, "operation_suppressed", subject, now, {
+                "source": source, "repository": repository,
+                "scheduled_for": scheduled_for, "result": "suppressed", "reason": reason,
+            })
+            return subject
+
     def acquire_lease(self, owner, oid, now, expires):
         with self.connect() as db:
             db.execute("DELETE FROM scan_lease WHERE expires_at<=?", (now,))

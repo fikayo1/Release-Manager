@@ -109,6 +109,8 @@ def test_c4_concurrent_ticks_converge_to_one_operation(client, journal):
     assert outcomes == ["draft_created", "suppressed"]
     scheduled = [op for op in store.operations() if op["scheduled_for"] == slot]
     assert len(scheduled) == 1
+    assert any(event["kind"] == "operation_suppressed"
+               for event in scheduled[0]["activity"])
 
     # A tick after completion for the same slot does not re-run it.
     after = OperationRunner(store, None, client_provider=client.app.state.github_provider).run("scheduled", slot)

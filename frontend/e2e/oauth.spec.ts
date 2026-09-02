@@ -3,7 +3,13 @@ import {readFileSync} from 'node:fs';
 import {BACKEND_LOG, FRONTEND_LOG} from './support/logs';
 
 // Must equal tests/fakes.py::CANARY_TOKEN.
-const CANARY = 'ghp_FaKeCaNaRy0000NeverLogMe0000DEADBEEFcafe';
+const SECRETS = [
+  'ghp_FaKeCaNaRy0000NeverLogMe0000DEADBEEFcafe',
+  'oauth-client-secret-browser-canary',
+  'cron-fixed-browser-test-secret',
+  'postgres://user:database-url-browser-canary@db.invalid/release',
+  'database-url-browser-canary',
+];
 const API = 'http://127.0.0.1:18000';
 
 test.describe.serial('OAuth acceptance (C1, C2)', () => {
@@ -62,7 +68,9 @@ test.describe.serial('OAuth acceptance (C1, C2)', () => {
       'captured frontend log': readFileSync(FRONTEND_LOG, 'utf8'),
     };
     for (const [where, value] of Object.entries(haystacks)) {
-      expect(value, `canary must be absent from ${where}`).not.toContain(CANARY);
+      for (const secret of SECRETS) {
+        expect(value, `server secret must be absent from ${where}`).not.toContain(secret);
+      }
     }
 
     // The session cookie stays HttpOnly and never appears in any request URL.

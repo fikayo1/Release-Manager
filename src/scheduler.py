@@ -25,10 +25,18 @@ class Scheduler:
         # The operation's durable scheduled_for slot is the claim. Marking a
         # slot only after the operation exists means a crash before creation is
         # retried after restart, while a completed operation is never duplicated.
-        if any(item["source"] == "scheduled" and item["scheduled_for"] == slot for item in self.store.operations()):
-            return {"slot": slot, "ran": False, "reason": "already_claimed"}
+        claimed = next((item for item in self.store.operations()
+                        if item["source"] == "scheduled" and item["scheduled_for"] == slot), None)
+        if claimed:
+            # Repeat HTTP ticks are operations too: persist a suppression receipt
+            # against the canonical slot owner without creating a second slot row.
+            self.store.record_suppressed_operation(
+                "scheduled", claimed["repository"], heartbeat.isoformat(), slot, "already_claimed"
+            )
+            return {"slot": slot, "ran": False, "reason": "already_claimed",
+                    "operation_id": claimed["id"], "result": "suppressed"}
         result=await asyncio.to_thread(self.runner.run,"scheduled",slot)
-        if result.get("id"):
+        if result.get("id") and result.get("result") != "suppressed":
             with self.store.connect() as db:
                 db.execute("UPDATE scheduler_state SET last_slot=?,last_operation_id=?,last_run_at=?,last_result=?,last_error=? WHERE id=1",(slot,result["id"],heartbeat.isoformat(),result["result"],result.get("error")))
         return {"slot": slot, "ran": True, "result": result.get("result"),

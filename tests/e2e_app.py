@@ -45,9 +45,10 @@ if os.getenv("E2E_KEEP_DB") != "1":
 # ``/test/scheduler/tick`` below.
 app = create_app(
     Settings(database=DB, scheduler_interval=3600, oauth_client_id="fixture-client",
-             oauth_client_secret="fixture-secret", oauth_callback_url=CALLBACK,
+             oauth_client_secret=os.getenv("GITHUB_OAUTH_CLIENT_SECRET", "oauth-client-secret-browser-canary"),
+             oauth_callback_url=CALLBACK,
              session_secret="deterministic-browser-session-secret", web_url=WEB,
-             cron_secret=os.getenv("CRON_SECRET", "cron-fixed-browser-test-secret")),
+             cron_secret=os.getenv("CRON_SECRET", "cron-secret-browser-canary")), 
     validate=False, enable_scheduler=False,
     oauth_service_factory=partial(FakeOAuth, authorize_origin=API_ORIGIN),
     account_client_factory=FakeAccountGitHub, github_client_factory=FakeRepositoryGitHub,

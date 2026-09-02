@@ -35,10 +35,13 @@ class OperationRunner:
         except Exception as exc:
             if not is_integrity_error(exc):
                 raise
-            # A concurrent tick already claimed this scheduled slot. The durable
-            # winning operation is the only row; this invocation reports a
-            # suppressed outcome without attempting GitHub work.
-            return {"id": None, "source": source, "repository": repository,
+            # Keep one canonical row per slot, but durably attach a suppression
+            # receipt to it so duplicate invocations are not merely synthetic
+            # in-memory outcomes.
+            claimed_id = self.store.record_suppressed_operation(
+                source, repository, now, scheduled_for, "duplicate_slot"
+            )
+            return {"id": claimed_id, "source": source, "repository": repository,
                     "status": "completed", "result": "suppressed", "error": None,
                     "scan_id": None, "pack_id": None, "started_at": now,
                     "finished_at": now, "scheduled_for": scheduled_for}
