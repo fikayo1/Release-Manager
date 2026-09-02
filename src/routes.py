@@ -27,6 +27,22 @@ def deps(request: Request):
     return request.app.state.store, request.app.state.github
 
 
+def account_client(request: Request, token: str):
+    factory = getattr(request.app.state, "account_client_factory", GitHubAccountClient)
+    return factory(token)
+
+
+def client_for_pack(request: Request, pack_id: str):
+    """Resolve credentials against the repository captured by the release scan."""
+    store, legacy = deps(request)
+    provider = getattr(request.app.state, "github_provider", None)
+    if not provider:
+        return legacy
+    pack = store.pack(pack_id)
+    repository = store.scan(pack["scan_id"])["repository"]
+    return provider(repository)
+
+
 class Decision(BaseModel):
     actor: str
     reason: str
@@ -111,11 +127,11 @@ async def review_decision(pack_id: str, decision: str, request: Request):
     if decision not in {"approve", "reject"}:
         raise HTTPException(404, "action not found")
     values = await _form_values(request)
-    store, github = deps(request)
+    store, _ = deps(request)
     try:
         if decision == "approve":
             approve(store, pack_id, values.get("actor", ""), values.get("reason", ""), now())
-            publish(store, github, pack_id, now())
+            publish(store, client_for_pack(request, pack_id), pack_id, now())
         else:
             reject(store, pack_id, values.get("actor", ""), values.get("reason", ""), now())
     except KeyError:
@@ -156,7 +172,7 @@ def github_callback(request: Request, state: str = "", code: str = "", error: st
         if error:
             raise OAuthError("GitHub authorization was denied")
         token, refresh, expires = oauth.exchange(code)
-        account = GitHubAccountClient(token).user()
+        account = account_client(request, token).user()
         expires_at = None
         if expires:
             from datetime import timedelta
@@ -181,7 +197,7 @@ def github_settings(request: Request):
     if connection and connection["status"] == "connected":
         credentials = store.github_credentials()
         try:
-            result["repositories"] = GitHubAccountClient(credentials["access_token"]).repositories()
+            result["repositories"] = account_client(request, credentials["access_token"]).repositories()
         except GitHubRevokedError:
             store.mark_github_revoked(now()); result["status"] = "revoked"
     return result
@@ -194,7 +210,7 @@ def choose_repository(data: RepositorySelection, request: Request):
     if not credentials or credentials["status"] != "connected":
         raise HTTPException(409, "Reconnect GitHub before selecting a repository")
     try:
-        allowed = {r["full_name"] for r in GitHubAccountClient(credentials["access_token"]).repositories()}
+        allowed = {r["full_name"] for r in account_client(request, credentials["access_token"]).repositories()}
     except GitHubRevokedError:
         store.mark_github_revoked(now()); raise HTTPException(409, "Reconnect GitHub before selecting a repository")
     if data.full_name not in allowed:
@@ -255,10 +271,10 @@ def get_pack(pack_id: str, request: Request):
 
 @router.post("/api/packs/{pack_id}/approve")
 def approve_pack(pack_id: str, data: Decision, request: Request):
-    store, github = deps(request)
+    store, _ = deps(request)
     try:
         approve(store, pack_id, data.actor, data.reason, now())
-        publish(store, github, pack_id, now())
+        publish(store, client_for_pack(request, pack_id), pack_id, now())
         return store.pack(pack_id)
     except KeyError:
         raise HTTPException(404, "pack not found")
@@ -282,7 +298,7 @@ def reject_pack(pack_id: str, data: Decision, request: Request):
 @router.post("/api/packs/{pack_id}/publish")
 def publish_pack(pack_id: str, request: Request):
     try:
-        return primitive(publish(*deps(request), pack_id, now()))
+        return primitive(publish(deps(request)[0], client_for_pack(request, pack_id), pack_id, now()))
     except KeyError:
         raise HTTPException(404, "pack not found")
     except StateError as exc:
@@ -294,7 +310,7 @@ def publish_pack(pack_id: str, request: Request):
 @router.post("/api/packs/{pack_id}/reconcile")
 def reconcile_pack(pack_id: str, request: Request):
     try:
-        return {"result": reconcile(*deps(request), pack_id, now())}
+        return {"result": reconcile(deps(request)[0], client_for_pack(request, pack_id), pack_id, now())}
     except KeyError:
         raise HTTPException(404, "pack not found")
     except StateError as exc:

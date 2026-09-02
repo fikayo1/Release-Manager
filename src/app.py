@@ -4,14 +4,16 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from .config import Settings
-from .github_client import GitHubClient
+from .github_client import GitHubAccountClient, GitHubClient
 from .github_oauth import OAuthService
 from .routes import router
 from .store import Store
 from .operations import OperationRunner
 from .scheduler import Scheduler
 
-def create_app(settings:Settings|None=None, github=None, validate:bool=True) -> FastAPI:
+def create_app(settings:Settings|None=None, github=None, validate:bool=True,
+               oauth_service_factory=None, account_client_factory=None,
+               github_client_factory=None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app:FastAPI):
         # A dependency-free app is useful for the isolated health probe test;
@@ -25,14 +27,17 @@ def create_app(settings:Settings|None=None, github=None, validate:bool=True) -> 
             app.state.settings=cfg
             app.state.github=github or (GitHubClient(cfg.owner,cfg.repo,cfg.token) if cfg.legacy else None)
             if cfg.interactive:
-                app.state.oauth=OAuthService(app.state.store,cfg.oauth_client_id,cfg.oauth_client_secret,
+                oauth_factory = oauth_service_factory or OAuthService
+                app.state.oauth=oauth_factory(app.state.store,cfg.oauth_client_id,cfg.oauth_client_secret,
                     cfg.oauth_callback_url,cfg.session_secret,cfg.secure_cookie)
+                app.state.account_client_factory = account_client_factory or GitHubAccountClient
+                repository_factory = github_client_factory or GitHubClient
                 def provider(slug):
                     credentials=app.state.store.github_credentials()
                     if not credentials or credentials["status"] != "connected":
                         raise RuntimeError("GitHub connection requires reconnect")
                     owner, repo = slug.split("/", 1)
-                    return GitHubClient(owner,repo,credentials["access_token"])
+                    return repository_factory(owner,repo,credentials["access_token"])
                 app.state.github_provider=provider
         if validate and cfg.legacy:
             app.state.github.repository()  # fail loud before serving in legacy mode
