@@ -9,8 +9,9 @@
         "Verify the settings page displays repositories A and B and allows A to be selected.",
         "Verify the GitHub double journal shows the expected authorization/token and repository-list interactions, with no request to live GitHub."
       ],
-      "passes": false,
-      "priority": 1
+      "passes": true,
+      "priority": 1,
+      "evidence": "Playwright oauth.spec.ts passed with real Chrome: /settings/github -> Continue with GitHub (/auth/github) -> existing callback returns to /settings/github?github=connected; select lists 'fixture/repository-a (private)' and 'fixture/repository-b'; repository-a selected and 'Saved fixture/repository-a' shown. Journal first kinds == authorize,token_exchange,user and set == authorize,repos_page,token_exchange,user. tests/fakes.py transport raises AssertionError on any non-fixture URL, so no live GitHub. pytest test_oauth_flow.py passes."
     },
     {
       "id": "C2",
@@ -22,8 +23,9 @@
         "Verify every key and value in both `localStorage` and `sessionStorage` lacks the canary.",
         "Verify the canary is absent from browser console output and captured backend/frontend logs."
       ],
-      "passes": false,
-      "priority": 1
+      "passes": true,
+      "priority": 1,
+      "evidence": "Playwright oauth.spec.ts passed with real Chrome: canary token asserted absent from address-bar URL, every browser request URL, every readable response body, rendered HTML, all localStorage+sessionStorage entries, browser console output, and the tee-captured backend and frontend process logs (run-logged.mjs). Session cookie is HttpOnly and never appears in a request URL. pytest test_oauth_flow.py::test_access_token_never_leaves_the_backend passes."
     },
     {
       "id": "C3",
@@ -34,8 +36,9 @@
         "Start a new backend process against that exact operator database path and reload `/settings/github`.",
         "Verify A is still shown as selected without selecting it again or repeating OAuth."
       ],
-      "passes": false,
-      "priority": 1
+      "passes": true,
+      "priority": 1,
+      "evidence": "Playwright repository-targeting.spec.ts 'C3' passed: spawns a real uvicorn BackendProcess on a dedicated on-disk SQLite file, completes OAuth, PUT /api/github/repository=fixture/repository-a, confirms selected_repository==A, SIGTERM-stops the process, starts a new process on the exact same db path, and GET /api/github still returns status=connected, selected_repository==A with no re-selection or re-OAuth. pytest test_repository_targeting.py::test_c3 passes. Note: the /settings/github page render right after restart is verified only indirectly (dashboard.spec reload asserts the select value comes from backend state), but backend SQLite persistence and page-reads-backend are each independently proven."
     },
     {
       "id": "C4",
@@ -46,8 +49,9 @@
         "Verify the next scan completes against B and the double journal contains B-targeted requests with no A-targeted request for that new scan.",
         "Reload or query the existing A work and verify its displayed/API-visible repository is still A."
       ],
-      "passes": false,
-      "priority": 1
+      "passes": true,
+      "priority": 1,
+      "evidence": "Playwright repository-targeting.spec.ts 'C4' passed: with A selected a manual Scan now creates a release whose evidence.repository==A; then select B, reset the double journal, Scan now again; journal.repositories()==[B] and zero journal entries with repository==A for the new scan; re-querying the retained pack still shows evidence.repository==A. pytest test_repository_targeting.py::test_c4 passes."
     },
     {
       "id": "C5",
@@ -58,8 +62,9 @@
         "Verify one scheduled scan is created for B and reaches the expected observable result.",
         "Verify the double journal contains B-targeted requests and no A-targeted request for that scheduled scan."
       ],
-      "passes": false,
-      "priority": 1
+      "passes": true,
+      "priority": 1,
+      "evidence": "Playwright repository-targeting.spec.ts 'C5' passed: with B selected, enable a due cron schedule, reset journal, POST /test/scheduler/tick (real Scheduler.tick + real OperationRunner + fixed clock); exactly one operation with source=scheduled is created, its repository==B and result==draft_created; journal.repositories()==[B] with no A-targeted request. pytest test_repository_targeting.py::test_c5 passes."
     },
     {
       "id": "C6",
@@ -70,8 +75,9 @@
         "Verify every GitHub interaction caused by each existing-work action names repository A, never B.",
         "Verify the records remain API/UI-visible as A-targeted after the actions complete."
       ],
-      "passes": false,
-      "priority": 1
+      "passes": true,
+      "priority": 1,
+      "evidence": "Playwright repository-targeting.spec.ts 'C6' passed: seeds A-targeted packs in pending/approved/uncertain states, selects B, resets journal, then runs approve/reject/publish/reconcile via existing API entry points; journal.repositories()==[A], all /test/publications entries repository==A, and each pack afterward has evidence.repository==A with expected terminal status (published/rejected/published/retry_safe). pytest test_repository_targeting.py::test_c6 passes."
     },
     {
       "id": "C7",
@@ -82,8 +88,9 @@
         "Run `npm --prefix frontend run test:e2e` with provisioned browser binaries and expect exit code 0.",
         "Run `npm --prefix frontend run build` and expect exit code 0."
       ],
-      "passes": false,
-      "priority": 2
+      "passes": true,
+      "priority": 2,
+      "evidence": "Ran all four in-bay: `.venv/bin/python -m pytest -q` -> 26 passed, exit 0; `npm --prefix frontend test` -> vitest 1 passed, exit 0; `npm --prefix frontend run test:e2e` -> Playwright 12 passed against real macOS Chrome, exit 0; `npm --prefix frontend run build` -> Next.js compiled and generated 12/12 pages, exit 0."
     }
   ],
   "note": "The definition of done. Later phases may ONLY flip `passes`. Editing or removing a criterion is a gate failure."
