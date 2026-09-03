@@ -2,95 +2,103 @@
   "criteria": [
     {
       "id": "C1",
-      "description": "The existing OAuth flow authorizes through deterministic doubles and permits repository selection without live GitHub access.",
+      "description": "Dashboard routes always settle into content or a bounded recoverable error instead of an indefinite loading spinner.",
       "verification": [
-        "Start the product with the operator database and a deterministic OAuth/GitHub double that returns repositories A and B plus a unique fake token canary.",
-        "From `/settings/github`, complete Continue with GitHub and return through the existing callback.",
-        "Verify the settings page displays repositories A and B and allows A to be selected.",
-        "Verify the GitHub double journal shows the expected authorization/token and repository-list interactions, with no request to live GitHub."
+        "Using seeded authenticated data, directly load, reload, and freshly navigate to `/`, `/releases`, and `/operations` at least 10 times each; every attempt renders the expected data.",
+        "Repeat with the backend deterministically delayed and then unavailable; an accessible skeleton appears without material layout movement and changes to an error state within 10 seconds.",
+        "Restore the backend and activate Retry; the route renders data without a full browser restart.",
+        "Run the deterministic frontend regression tests covering normal, delayed, and failed responses; they pass."
       ],
-      "passes": true,
-      "priority": 1,
-      "evidence": "Playwright oauth.spec.ts passed with real Chrome: /settings/github -> Continue with GitHub (/auth/github) -> existing callback returns to /settings/github?github=connected; select lists 'fixture/repository-a (private)' and 'fixture/repository-b'; repository-a selected and 'Saved fixture/repository-a' shown. Journal first kinds == authorize,token_exchange,user and set == authorize,repos_page,token_exchange,user. tests/fakes.py transport raises AssertionError on any non-fixture URL, so no live GitHub. pytest test_oauth_flow.py passes."
+      "passes": false,
+      "priority": 1
     },
     {
       "id": "C2",
-      "description": "The OAuth access token is not exposed to the browser or logs after OAuth completes.",
+      "description": "All scan triggers and other state-changing routes enforce authentication, ownership, request-origin protection, and scan concurrency limits.",
       "verification": [
-        "Use the fake token canary while capturing browser request/response traffic, console output, and backend/frontend process logs from callback completion through loading and saving repository settings.",
-        "Verify the canary is absent from the final address-bar URL and every browser-observed request URL.",
-        "Verify the canary is absent from rendered page text/HTML and every readable browser-observed HTTP response body.",
-        "Verify every key and value in both `localStorage` and `sessionStorage` lacks the canary.",
-        "Verify the canary is absent from browser console output and captured backend/frontend logs."
+        "Call `POST /api/scans` and the equivalent backend scan route without a session; each returns 401 and the GitHub fake records no call.",
+        "With user B's session, request a scan or release action against user A's repository or record ID; each returns a generic 403 and creates no operation, audit mutation, or GitHub call.",
+        "With user A's valid session and origin, start a scan of A's selected repository; it succeeds and invokes the GitHub fake once.",
+        "Under the current Vercel limit of one concurrent user scan, attempt another while the first remains active; it returns 429 and does not invoke GitHub. Verify the configurable limit accepts values up to 10 and another user has an independent allowance.",
+        "Trigger a trusted scheduled scan while a user scan is active; it remains exempt from the user concurrency limit and still requires valid `CRON_SECRET` authentication.",
+        "Verify the protected-route matrix also covers repository selection, schedule changes, approval, rejection, publication, and any direct backend aliases."
       ],
-      "passes": true,
-      "priority": 1,
-      "evidence": "Playwright oauth.spec.ts passed with real Chrome: canary token asserted absent from address-bar URL, every browser request URL, every readable response body, rendered HTML, all localStorage+sessionStorage entries, browser console output, and the tee-captured backend and frontend process logs (run-logged.mjs). Session cookie is HttpOnly and never appears in a request URL. pytest test_oauth_flow.py::test_access_token_never_leaves_the_backend passes."
+      "passes": false,
+      "priority": 1
     },
     {
       "id": "C3",
-      "description": "The selected repository survives a real backend restart using the same operator SQLite database.",
+      "description": "Two independently authenticated GitHub accounts have isolated connections, repositories, workflow records, actions, and protected tokens.",
       "verification": [
-        "Complete OAuth against the operator database, select repository A, and confirm A is shown as selected.",
-        "Terminate the backend process without replacing or resetting the database.",
-        "Start a new backend process against that exact operator database path and reload `/settings/github`.",
-        "Verify A is still shown as selected without selecting it again or repeating OAuth."
+        "Sign in as two fake GitHub accounts with disjoint repository grants and select a repository for each.",
+        "For each user, repository selectors and `GET /api/scans` expose only that user's authorized repositories and scans.",
+        "Create scans, packs, operations, decisions, schedules, and audit events for both users; each dashboard and API session displays only its own records.",
+        "Attempt cross-user read, scan, approve, reject, and publish operations; all are denied and neither user's records nor GitHub calls are changed.",
+        "Confirm there are no shared team, organization, or application-role access paths.",
+        "Confirm the fake OAuth token canary appears in neither browser responses nor logs nor plaintext in the test database."
       ],
-      "passes": true,
-      "priority": 1,
-      "evidence": "Playwright repository-targeting.spec.ts 'C3' passed: spawns a real uvicorn BackendProcess on a dedicated on-disk SQLite file, completes OAuth, PUT /api/github/repository=fixture/repository-a, confirms selected_repository==A, SIGTERM-stops the process, starts a new process on the exact same db path, and GET /api/github still returns status=connected, selected_repository==A with no re-selection or re-OAuth. pytest test_repository_targeting.py::test_c3 passes. Note: the /settings/github page render right after restart is verified only indirectly (dashboard.spec reload asserts the select value comes from backend state), but backend SQLite persistence and page-reads-backend are each independently proven."
+      "passes": false,
+      "priority": 1
     },
     {
       "id": "C4",
-      "description": "Changing selection from A to B makes the next manual scan target B while previously created A work remains associated with A.",
+      "description": "Every navigation destination and compatibility URL is directly loadable and refresh-safe.",
       "verification": [
-        "With A selected in the operator database, start a manual scan and retain its resulting A-targeted work record.",
-        "Change the selected repository to B, clear the GitHub double request journal, and click the existing Scan now control.",
-        "Verify the next scan completes against B and the double journal contains B-targeted requests with no A-targeted request for that new scan.",
-        "Reload or query the existing A work and verify its displayed/API-visible repository is still A."
+        "In an authenticated browser, directly load and refresh `/`, `/releases`, `/operations`, `/settings/github`, `/settings/schedule`, and a valid `/releases/{id}`; none returns 404.",
+        "Directly load `/github` and `/schedule`; each resolves or redirects to the corresponding settings page while preserving a usable refresh or bookmark URL.",
+        "Activate every sidebar link and confirm its destination renders the intended page."
       ],
-      "passes": true,
-      "priority": 1,
-      "evidence": "Playwright repository-targeting.spec.ts 'C4' passed: with A selected a manual Scan now creates a release whose evidence.repository==A; then select B, reset the double journal, Scan now again; journal.repositories()==[B] and zero journal entries with repository==A for the new scan; re-querying the retained pack still shows evidence.repository==A. pytest test_repository_targeting.py::test_c4 passes."
+      "passes": false,
+      "priority": 1
     },
     {
       "id": "C5",
-      "description": "After selection changes to B, the next due scheduled scan targets B exactly as the manual scan does.",
+      "description": "Release-pack creation is idempotent per user, repository, and version while scan and audit history remains intact.",
       "verification": [
-        "Keep B selected, enable a deterministically due schedule, and clear the GitHub double request journal.",
-        "Drive the real scheduler path with the controlled acceptance-test clock or due-schedule harness.",
-        "Verify one scheduled scan is created for B and reaches the expected observable result.",
-        "Verify the double journal contains B-targeted requests and no A-targeted request for that scheduled scan."
+        "Run the same deterministic scan twice for one user, repository, and version.",
+        "Confirm only one current release pack exists for that identity and the release list does not show a duplicate.",
+        "Confirm both scan attempts and their audit history remain queryable.",
+        "Repeat with another user or repository using the same version; a distinct current pack is created without affecting the first."
       ],
-      "passes": true,
-      "priority": 1,
-      "evidence": "Playwright repository-targeting.spec.ts 'C5' passed: with B selected, enable a due cron schedule, reset journal, POST /test/scheduler/tick (real Scheduler.tick + real OperationRunner + fixed clock); exactly one operation with source=scheduled is created, its repository==B and result==draft_created; journal.repositories()==[B] with no A-targeted request. pytest test_repository_targeting.py::test_c5 passes."
+      "passes": false,
+      "priority": 2
     },
     {
       "id": "C6",
-      "description": "Changing the current selection to B never retargets reconcile, rollback, approval, or publish actions for existing A work.",
+      "description": "Operation and scan interfaces expose polished, accessible production information.",
       "verification": [
-        "Prepare A-targeted records in the operator database in states where reconcile, rollback, approval, and publication are each applicable, then select B.",
-        "Perform each action through its existing UI or API entry point and inspect the resulting workflow state and GitHub double journal.",
-        "Verify every GitHub interaction caused by each existing-work action names repository A, never B.",
-        "Verify the records remain API/UI-visible as A-targeted after the actions complete."
+        "Open Operations and confirm raw labels such as `Non Release manual` are replaced by human-readable wording and every operation displays a timestamp.",
+        "Call `GET /api/scans` without a session and receive 401; call it with a session and receive a list containing only that user's scans.",
+        "At a mobile viewport, measure sidebar, retry, scan, decision, and settings controls; every interactive target is at least 24 by 24 CSS pixels.",
+        "Keyboard and accessibility inspection identifies the loading skeleton and error/retry state with meaningful accessible text."
       ],
-      "passes": true,
-      "priority": 1,
-      "evidence": "Playwright repository-targeting.spec.ts 'C6' passed: seeds A-targeted packs in pending/approved/uncertain states, selects B, resets journal, then runs approve/reject/publish/reconcile via existing API entry points; journal.repositories()==[A], all /test/publications entries repository==A, and each pack afterward has evidence.repository==A with expected terminal status (published/rejected/published/retry_safe). pytest test_repository_targeting.py::test_c6 passes."
+      "passes": false,
+      "priority": 3
     },
     {
       "id": "C7",
-      "description": "All existing backend, frontend unit, browser acceptance, and production-build checks remain green.",
+      "description": "Operator documentation accurately describes authentication, isolation, public routes, environment names, and separate Vercel projects without exposing values.",
       "verification": [
-        "Run `.venv/bin/python -m pytest -q` and expect exit code 0.",
-        "Run `npm --prefix frontend test` and expect exit code 0.",
-        "Run `npm --prefix frontend run test:e2e` with provisioned browser binaries and expect exit code 0.",
-        "Run `npm --prefix frontend run build` and expect exit code 0."
+        "README/operator docs identify health and OAuth entry/callback as public, protected UI and API behavior, one-account-per-user ownership, token protection, scan concurrency limits, and trusted scheduler authentication and exemption.",
+        "Docs retain separate `backend` FastAPI and `frontend` Next.js Vercel roots and state that `RELEASE_MANAGER_API_URL` is server-only.",
+        "Docs list all required environment-variable names, migration steps, and verification commands, and explain whether `GITHUB_TOKEN`, `GITHUB_OWNER`, and `GITHUB_REPO` are legacy or local compatibility variables.",
+        "Search the documentation and tracked examples; no real secret or OAuth token value is present."
       ],
-      "passes": true,
-      "priority": 2,
-      "evidence": "Ran all four in-bay: `.venv/bin/python -m pytest -q` -> 26 passed, exit 0; `npm --prefix frontend test` -> vitest 1 passed, exit 0; `npm --prefix frontend run test:e2e` -> Playwright 12 passed against real macOS Chrome, exit 0; `npm --prefix frontend run build` -> Next.js compiled and generated 12/12 pages, exit 0."
+      "passes": false,
+      "priority": 3
+    },
+    {
+      "id": "C8",
+      "description": "The complete offline verification chain passes without deployment or cloud-resource creation.",
+      "verification": [
+        "Run `.venv/bin/python -m pytest -q`; it exits successfully.",
+        "Run `npm --prefix frontend test`; it exits successfully.",
+        "Run `npm --prefix frontend run test:e2e`; it exits successfully using loopback services and deterministic fakes.",
+        "Run `npm --prefix frontend run build`; the production Next.js build exits successfully.",
+        "Confirm no deployment command ran and no cloud resource or deployment artifact was created."
+      ],
+      "passes": false,
+      "priority": 1
     }
   ],
   "note": "The definition of done. Later phases may ONLY flip `passes`. Editing or removing a criterion is a gate failure."
