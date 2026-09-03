@@ -12,6 +12,6 @@
     { "source": "/_api/:path*", "destination": "/api/index" }
   ],
   "crons": [
-    { "path": "/api/cron/scheduler", "schedule": "*/5 * * * *" }
+    { "path": "/api/cron/scheduler", "schedule": "0 9 * * *" }
   ]
 }

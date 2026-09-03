@@ -22,6 +22,9 @@ def test_vercel_json_references_the_next_app_and_python_function():
     assert "api/index.py" in text
     assert "crons" in config and config["crons"]
     assert any("/api/cron/scheduler" in c.get("path", "") for c in config["crons"])
+    assert config["crons"] == [
+        {"path": "/api/cron/scheduler", "schedule": "0 9 * * *"}
+    ]
 
 
 def test_python_entrypoint_imports_the_app_and_disables_the_scheduler():
