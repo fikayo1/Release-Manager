@@ -21,7 +21,7 @@ def test_vercel_json_references_the_next_app_and_python_function():
     package = json.loads((ROOT / "package.json").read_text())
     text = json.dumps(config)
     assert package["workspaces"] == ["frontend"]
-    assert package["dependencies"]["next"]
+    assert package["dependencies"]["next"] == "15.5.10"
     assert package["dependencies"]["react"] == "19.1.1"
     assert package["dependencies"]["react-dom"] == "19.1.1"
     assert (ROOT / "package-lock.json").is_file()
