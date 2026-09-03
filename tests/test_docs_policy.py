@@ -25,7 +25,7 @@ def test_readme_documents_route_policy_and_identity_boundary():
         "one authenticated GitHub account is exactly one user",
         "shared organization, team, or application role",
         "401", "403", "429",
-        "redirect to `/settings/github`",
+        "redirect to `/login`",
     ]:
         assert phrase in README, phrase
 

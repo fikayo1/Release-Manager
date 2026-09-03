@@ -15,7 +15,7 @@ PYTHONPATH=backend .venv/bin/uvicorn src.app:app --host 127.0.0.1 --port 8000
 npm --prefix frontend run dev -- --hostname 127.0.0.1 --port 13000
 ```
 
-Open **http://127.0.0.1:13000/settings/github**, choose **Continue with GitHub**, authorize the `repo` scope, and select a repository. Dashboard routes are `/`, `/releases`, `/operations`, `/settings/github`, and `/settings/schedule`; release details are `/releases/{id}`. Backend health is **http://127.0.0.1:8000/health**. `RELEASE_MANAGER_API_URL` is server-only; never expose secrets through `NEXT_PUBLIC_` variables.
+Open **http://127.0.0.1:13000/**, the public marketing landing page, then **http://127.0.0.1:13000/login** and choose **Continue with GitHub**, authorize the `repo` scope, and select a repository on **/dashboard/settings/github**. Completing OAuth lands you on **/dashboard**. The authenticated console lives under `/dashboard`: `/dashboard` (overview), `/dashboard/releases`, `/dashboard/operations`, `/dashboard/settings/github`, and `/dashboard/settings/schedule`; release details are `/dashboard/releases/{id}`. `/` and `/login` are public and render with no session. Backend health is **http://127.0.0.1:8000/health**. `RELEASE_MANAGER_API_URL` is server-only; never expose secrets through `NEXT_PUBLIC_` variables.
 
 Each connected GitHub user has an independent five-field UTC schedule. Standalone FastAPI owns an in-process scheduler; `SCHEDULER_INTERVAL_SECONDS` controls its polling interval. Navigation and refresh are read-only: only **Scan now** or a due enabled schedule starts a scan. Operations, leases, scans, release packs, decisions, publication attempts, reconciliation, audit records, OAuth tokens, and repository selection are persistent and user-owned. Approval requires an actor and reason and immediately attempts publication. An uncertain publication must be reconciled before retrying.
 
@@ -36,7 +36,7 @@ Migrations are additive, versioned, automatic, idempotent, and serialized with a
 PYTHONPATH=backend .venv/bin/python -m src.migrate
 ```
 
-After deployment, open **https://<production-domain>/settings/github**, click **Continue with GitHub**, authorize, confirm **Connected as**, select a repository, click **Scan now** on `/`, and confirm that a draft appears under `/releases`.
+After deployment, open **https://<production-domain>/login**, click **Continue with GitHub**, authorize, land on `/dashboard`, open **/dashboard/settings/github**, confirm **Connected as**, select a repository, click **Scan now** on `/dashboard`, and confirm that a draft appears under `/dashboard/releases`.
 
 Without `DATABASE_URL`/`POSTGRES_URL`, SQLite remains the local/CI fallback. Back it up before upgrades and restrict/encrypt backups because it contains OAuth tokens. In production use HTTPS; the session cookie is HttpOnly, SameSite=Lax, and Secure. There is no application role gate, so restrict network access.
 
@@ -55,8 +55,10 @@ connection, OAuth tokens, repository selection, scans, release packs, decisions,
 schedule, operations, and audit are per-user. Protected API routes answer
 `401` without a session, a generic `403` for a cross-user resource, and `429`
 when the caller is at the scan-concurrency limit. Protected dashboard routes
-redirect to `/settings/github` when the browser has no session and never render
-another user's data.
+(everything under `/dashboard`) redirect to `/login` when the browser has no
+session and never render another user's data; `/` and `/login` are public.
+Completing OAuth redirects to `/dashboard`; an OAuth failure redirects to
+`/login?error=<status>`.
 
 **Token protection.** OAuth access and refresh tokens never leave the FastAPI
 process, are **encrypted at rest** (stdlib-only authenticated encryption; key

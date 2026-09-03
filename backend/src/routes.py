@@ -242,7 +242,11 @@ def github_callback(request: Request, state: str = "", code: str = "", error: st
         status = "denied" if error else "invalid_state"
     except Exception:
         status = "exchange_failed"
-    destination = settings.web_url.rstrip("/") + "/settings/github?" + urlencode({"github": status})
+    base = settings.web_url.rstrip("/")
+    if status == "connected":
+        destination = base + "/dashboard"
+    else:
+        destination = base + "/login?" + urlencode({"error": status})
     return RedirectResponse(destination, 303)
 
 @router.get("/api/github")

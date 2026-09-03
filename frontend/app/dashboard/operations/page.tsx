@@ -1,12 +1,13 @@
 export const dynamic = 'force-dynamic';
-import {api} from '@/lib/api';
-import {utc} from '@/lib/format';
-import {operationTitle, statusLabel} from '@/lib/labels';
-import {StatusBadge} from '@/components/StatusBadge';
-import {AuditTimeline} from '@/components/AuditTimeline';
+import { api } from '@/lib/api';
+import { guard } from '@/lib/session';
+import { utc } from '@/lib/format';
+import { operationTitle, statusLabel } from '@/lib/labels';
+import { StatusBadge } from '@/components/StatusBadge';
+import { AuditTimeline } from '@/components/AuditTimeline';
 
 export default async function Operations() {
-  const items = await api<any[]>('/api/operations');
+  const items = await guard(() => api<any[]>('/api/operations'));
   return (
     <>
       <h1>Operations</h1>
@@ -29,7 +30,7 @@ export default async function Operations() {
               {o.error && <p role="alert">{o.error}</p>}
               {o.pack_id && (
                 <>
-                  <a href={`/releases/${o.pack_id}`}>Related release</a>
+                  <a href={`/dashboard/releases/${o.pack_id}`}>Related release</a>
                   <p>Release state: {statusLabel(o.pack_status)}</p>
                 </>
               )}

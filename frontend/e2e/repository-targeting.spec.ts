@@ -8,7 +8,13 @@ const A = 'fixture/repository-a';
 const B = 'fixture/repository-b';
 
 async function ensureConnected(page: Page) {
-  await page.goto('/settings/github');
+  await page.goto('/login');
+  const loginLink = page.getByRole('link', {name: 'Continue with GitHub'});
+  if (await loginLink.isVisible().catch(() => false)) {
+    await loginLink.click();
+    await expect(page).toHaveURL(/\/dashboard$/);
+  }
+  await page.goto('/dashboard/settings/github');
   const link = page.getByRole('link', {name: 'Continue with GitHub'});
   if (await link.isVisible().catch(() => false)) {
     await link.click();
@@ -18,7 +24,7 @@ async function ensureConnected(page: Page) {
 }
 
 async function selectRepo(page: Page, fullName: string) {
-  await page.goto('/settings/github');
+  await page.goto('/dashboard/settings/github');
   const save = page.getByRole('button', {name: 'Save repository'});
   await expect(async () => {
     await page.getByLabel('Repository').selectOption(fullName);
@@ -29,7 +35,7 @@ async function selectRepo(page: Page, fullName: string) {
 }
 
 async function scanNow(page: Page) {
-  await page.goto('/');
+  await page.goto('/dashboard');
   await page.getByRole('button', {name: 'Scan now'}).click();
   await expect(page.getByRole('status')).toContainText('draft_created');
 }
@@ -69,7 +75,7 @@ test.describe.serial('repository targeting acceptance (C3-C6)', () => {
     await ensureConnected(page);
     await selectRepo(page, B);
 
-    await page.goto('/settings/schedule');
+    await page.goto('/dashboard/settings/schedule');
     await page.getByLabel('Cron expression (UTC)').fill('* * * * *');
     await page.getByLabel('Enabled').check();
     await page.getByRole('button', {name: 'Save schedule'}).click();
@@ -133,7 +139,7 @@ test.describe.serial('repository targeting acceptance (C3-C6)', () => {
     await backend.start();
     try {
       await page.goto(`${backend.origin}/auth/github`);
-      await expect(page).toHaveURL(/settings\/github\?github=connected/);
+      await expect(page).toHaveURL(new RegExp(`${backend.origin}/dashboard$`));
       const put = await page.request.put(`${backend.origin}/api/github/repository`, {data: {full_name: A}});
       expect(put.ok()).toBeTruthy();
 

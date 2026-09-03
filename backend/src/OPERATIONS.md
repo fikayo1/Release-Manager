@@ -1,6 +1,6 @@
 # Release Manager operations
 
-See [`README.md`](../README.md) for local startup and the complete Vercel deployment guide. Locally, open `http://127.0.0.1:13000/settings/github`; in production open `https://<production-domain>/settings/github`. Health is `GET /health`.
+See [`README.md`](../README.md) for local startup and the complete Vercel deployment guide. Locally, open `http://127.0.0.1:13000/login` and sign in; the console then lives under `/dashboard`, and repository selection is at `http://127.0.0.1:13000/dashboard/settings/github`. In production open `https://<production-domain>/login` then `https://<production-domain>/dashboard/settings/github`. Health is `GET /health`.
 
 The Vercel entrypoint `api/index.py` disables the lifespan polling scheduler. Scheduled work there runs only when Vercel Cron sends `GET /api/cron/scheduler` with its `Authorization: Bearer <CRON_SECRET>` and documented `User-Agent: vercel-cron/1.0`; the route verifies both before forwarding to protected `POST /scheduler/tick`. Standalone `uvicorn src.app:app` retains the in-process UTC scheduler.
 
@@ -15,7 +15,8 @@ team, or application role. Every domain row (GitHub connection, OAuth tokens,
 repository selection, scans, packs, decisions, schedule, operations, audit) is
 owned by a `user_id`. Protected API routes return `401` without a session, a
 generic `403` across users, and `429` at the scan-concurrency limit; protected
-dashboard routes redirect unauthenticated browsers to `/settings/github`.
+dashboard routes (everything under `/dashboard`) redirect unauthenticated
+browsers to `/login`.
 
 OAuth access and refresh tokens are **encrypted at rest** with a stdlib-only
 authenticated construction (`src/crypto.py`). The key comes from
@@ -32,4 +33,4 @@ in-flight scans per user. Trusted scheduled scans authenticate with
 The legacy `GITHUB_TOKEN` / `GITHUB_OWNER` / `GITHUB_REPO` triple is a
 topology-compatibility artifact only and is ignored by the OAuth path.
 
-Approval and rejection require an actor and reason. Approval immediately publishes. An uncertain publish must be reconciled before retrying. Navigation is read-only; explicit **Scan now** or a due schedule starts work. Inspect `/operations`, `/releases`, and backend `GET /api/audit` for durable outcomes and receipts.
+Approval and rejection require an actor and reason. Approval immediately publishes. An uncertain publish must be reconciled before retrying. Navigation is read-only; explicit **Scan now** or a due schedule starts work. Inspect `/dashboard/operations`, `/dashboard/releases`, and backend `GET /api/audit` for durable outcomes and receipts.

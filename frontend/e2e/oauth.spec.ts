@@ -22,15 +22,16 @@ test.describe.serial('OAuth acceptance (C1, C2)', () => {
     page.on('response', async r => { try { responseBodies.push(await r.text()); } catch { /* opaque */ } });
 
     // Initiate OAuth through the same-origin route the "Continue with GitHub"
-    // link targets. Re-authorising is idempotent, so this exercises the full
-    // flow whether or not an earlier spec already connected the shared backend.
-    await page.goto('/settings/github');
+    // link targets. Re-authorising is idempotent.
+    await page.goto('/login');
     await page.request.post(`${API}/test/github/journal/reset`);
     await page.goto('/auth/github');
-    await expect(page).toHaveURL(/settings\/github\?github=connected/);
+    await expect(page).toHaveURL(/\/dashboard$/);
+
+    // Repository selection now lives on the dashboard settings route.
+    await page.goto('/dashboard/settings/github');
     await expect(page.getByText('Connected as')).toBeVisible();
 
-    // C1: the settings page offers repositories A and B and allows A to be selected.
     const select = page.getByLabel('Repository');
     await expect(select.locator('option')).toContainText([
       'Select a repository', 'fixture/repository-a (private)', 'fixture/repository-b',

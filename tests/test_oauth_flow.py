@@ -58,7 +58,7 @@ def test_oauth_completes_and_lists_repositories(tmp_path, journal):
     app = build_app(tmp_path / "operator.db")
     with TestClient(app) as client:
         callback = complete_oauth(client)
-        assert callback.headers["location"] == "http://127.0.0.1:13000/settings/github?github=connected"
+        assert callback.headers["location"] == "http://127.0.0.1:13000/dashboard"
 
         settings = client.get("/api/github").json()
         assert settings["status"] == "connected"
@@ -109,16 +109,17 @@ def test_invalid_state_paths_keep_their_existing_status_codes(tmp_path, journal)
     app = build_app(tmp_path / "operator.db")
     with TestClient(app) as client:
         missing = client.get("/auth/github/callback", params={"code": "accepted"}, follow_redirects=False)
-        assert "github=invalid_state" in missing.headers["location"]
+        assert missing.status_code == 303
+        assert "/login?error=invalid_state" in missing.headers["location"]
 
         wrong = client.get("/auth/github/callback", params={"state": "not-a-real-state", "code": "accepted"},
                            follow_redirects=False)
-        assert "github=invalid_state" in wrong.headers["location"]
+        assert "/login?error=invalid_state" in wrong.headers["location"]
 
         state = _authorize_state(client)
         denied = client.get("/auth/github/callback", params={"state": state, "error": "access_denied"},
                             follow_redirects=False)
-        assert "github=denied" in denied.headers["location"]
+        assert "/login?error=denied" in denied.headers["location"]
 
         # A consumed state cannot be replayed.
         state = _authorize_state(client)
@@ -126,4 +127,4 @@ def test_invalid_state_paths_keep_their_existing_status_codes(tmp_path, journal)
                           follow_redirects=False).status_code == 303
         replay = client.get("/auth/github/callback", params={"state": state, "code": "accepted"},
                             follow_redirects=False)
-        assert "github=invalid_state" in replay.headers["location"]
+        assert "/login?error=invalid_state" in replay.headers["location"]

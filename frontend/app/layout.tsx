@@ -1,3 +1,17 @@
-import './globals.css';import {AppNav} from '@/components/AppNav';
-export const metadata={title:'Release Manager',description:'Governed release operations'};
-export default function Layout({children}:{children:React.ReactNode}){return <html lang="en"><body><header><div><strong>Release Manager</strong><span>Operator dashboard</span></div><AppNav/></header><main>{children}</main></body></html>}
+import './globals.css';
+
+export const metadata = {
+  title: 'Release Manager',
+  description: 'Governed release operations',
+};
+
+// The root layout owns only <html>/<body>. Each surface renders its own
+// landmark: the dashboard shell owns <main> + the sidebar <nav>, while the
+// marketing and login pages own a single <main>.
+export default function Layout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en">
+      <body>{children}</body>
+    </html>
+  );
+}

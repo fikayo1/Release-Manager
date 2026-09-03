@@ -1,3 +1,37 @@
-export const dynamic = 'force-dynamic';
-import Link from 'next/link';import {api} from '@/lib/api';import {utc} from '@/lib/format';import {operationTitle} from '@/lib/labels';import {ScanNowButton} from '@/components/ScanNowButton';import {StatusBadge} from '@/components/StatusBadge';
-export default async function Home(){const [operations,releases,schedule]=await Promise.all([api<any[]>('/api/operations'),api<any[]>('/api/releases'),api<any>('/api/schedule')]);return <><div className="hero"><p>Governed releases, from evidence to publication.</p><h1>Release overview</h1><ScanNowButton/></div><div className="grid"><section><h2>Schedule</h2><p>{schedule.enabled?schedule.expression:'Disabled'} · UTC</p><Link href="/settings/schedule">Configure schedule</Link></section><section><h2>Recent operations</h2>{operations.slice(0,5).map(o=><p key={o.id}><StatusBadge value={o.result||o.status}/> {operationTitle(o)} · {utc(o.started_at)}</p>)}{!operations.length&&<p>No operations yet.</p>}</section><section><h2>Release packs</h2><p>{releases.length} total</p><Link href="/releases">Review releases</Link></section></div></>}
+import Link from 'next/link';
+import { hasSession } from '@/lib/session';
+
+// Public marketing landing page. Server component; reads cookie presence only
+// (never calls the API), so it renders identically with or without a backend
+// and exposes no release, operation, or repository data in either state.
+export default async function Home() {
+  const authed = await hasSession();
+  return (
+    <main className="editorial">
+      <p className="eyebrow">Release Manager</p>
+      <h1>Evidence in. Governed releases out.</h1>
+      <p className="lede">
+        Release Manager turns a codebase scan into a reviewable release pack —
+        rationale, notes, and the change history behind them — then holds
+        publication until a named human approves it with a reason. Every scan,
+        decision, and publication attempt is recorded for audit.
+      </p>
+      <div className="cta-row">
+        {authed ? (
+          <Link className="button" href="/dashboard">
+            Go to dashboard
+          </Link>
+        ) : (
+          <>
+            <Link className="button" href="/login">
+              Open the console
+            </Link>
+            <a className="button" href="/auth/github">
+              Login with GitHub
+            </a>
+          </>
+        )}
+      </div>
+    </main>
+  );
+}
