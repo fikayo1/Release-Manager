@@ -10,7 +10,8 @@
         "Run the deterministic frontend regression tests covering normal, delayed, and failed responses; they pass."
       ],
       "passes": false,
-      "priority": 1
+      "priority": 1,
+      "evidence": "Resilience components exist (components/Skeleton.tsx role=status/aria-busy, components/RetryableError.tsx with reset(), app/loading.tsx + app/error.tsx for /, /releases, /operations) and the happy-path e2e (e2e/dashboard.spec.ts) loads/reloads/navigates the three routes and passes. But verification items 2-4 are unmet: no deterministic frontend regression test drives /, /releases, /operations against a deterministically delayed then unavailable backend, asserts the accessible skeleton appears without layout movement and flips to an error state within 10s, or asserts Retry recovers the route without a browser restart. frontend/lib/http.test.ts only unit-tests the 8s AbortController timeout and 401/403/429 error mapping in isolation. The delayed/failed/retry behavior is therefore unverified by any existing test and cannot be confirmed without adding files."
     },
     {
       "id": "C2",
@@ -24,7 +25,8 @@
         "Verify the protected-route matrix also covers repository selection, schedule changes, approval, rejection, publication, and any direct backend aliases."
       ],
       "passes": false,
-      "priority": 1
+      "priority": 1,
+      "evidence": "Live probe of the backend (starlette TestClient, no session cookie): POST /api/scans -> 201 (expected 401), PUT /api/schedule -> 200 mutation succeeded (expected 401), PUT /api/github/repository -> 409, POST /api/packs/x/approve -> 409, POST /api/packs/x/reject -> 409 (all reach business logic, none return 401). backend/src/routes.py performs no session read, no Origin/CSRF check, and no ownership check on any mutating route. Settings.max_concurrent_scans (backend/src/config.py:35) is parsed and clamped but referenced by no runtime code; OperationRunner (backend/src/operations.py) serializes scans via a single global scan_lease(id=1) and returns a 201 'suppressed' receipt on contention, never 429; no GitHub call is skipped with a 429. Only the scheduled-scan sub-items hold: /scheduler/tick and the /api/cron/scheduler proxy require CRON_SECRET + vercel-cron user-agent (e2e/cron.spec.ts passes), but the concurrency exemption is moot since no user cap exists."
     },
     {
       "id": "C3",
@@ -38,7 +40,8 @@
         "Confirm the fake OAuth token canary appears in neither browser responses nor logs nor plaintext in the test database."
       ],
       "passes": false,
-      "priority": 1
+      "priority": 1,
+      "evidence": "No user concept exists anywhere. backend/src/migrations.py has no users table and no user_id column; github_connection and schedules are single-row 'id INTEGER PRIMARY KEY CHECK(id=1)'; store reads/writes operate on WHERE id=1. tests/fakes.py models exactly one GitHub account ('oauth-fixture', id 42) with no two-account support, so two independently authenticated accounts with disjoint grants cannot be exercised. There are no 401/403 identity code paths. GET /api/scans does not exist. The only satisfied sub-item is the token canary: tests/test_token_encryption.py and tests/test_token_leak.py pass and confirm CANARY_TOKEN is absent from the SQLite file and from browser payloads/logs (backend/src/crypto.py encrypts tokens at rest, github_connection() omits credential columns)."
     },
     {
       "id": "C4",
@@ -48,8 +51,9 @@
         "Directly load `/github` and `/schedule`; each resolves or redirects to the corresponding settings page while preserving a usable refresh or bookmark URL.",
         "Activate every sidebar link and confirm its destination renders the intended page."
       ],
-      "passes": false,
-      "priority": 1
+      "passes": true,
+      "priority": 1,
+      "evidence": "next build lists /, /releases, /operations, /releases/[id], /settings/github, /settings/schedule as app-router pages (no 404 possible). frontend/next.config.mjs redirects() returns 307 (permanent:false) forwards /github -> /settings/github and /schedule -> /settings/schedule, which are refresh- and bookmark-safe. All 14 Playwright e2e tests pass (Chrome at /Applications/Google Chrome.app), including e2e/dashboard.spec.ts which directly loads and reloads /, /releases, /operations, /settings/github, /settings/schedule and a valid /releases/{id}, clicks the Releases and Operations sidebar links, and a mobile test that directly loads /, /releases, /operations, /settings/schedule. components/AppNav.tsx links all resolve to those real routes."
     },
     {
       "id": "C5",
@@ -61,7 +65,8 @@
         "Repeat with another user or repository using the same version; a distinct current pack is created without affecting the first."
       ],
       "passes": false,
-      "priority": 2
+      "priority": 2,
+      "evidence": "backend/src/phases/draft.py calls store.save_pack with a fresh uuid4 pack id every run; backend/src/store.py save_pack does an unconditional 'INSERT INTO packs VALUES(...)'. The packs table (backend/src/migrations.py) is keyed on id with only 'scan_id TEXT UNIQUE'; there is no (user, repository, version) uniqueness constraint and no user or repository dimension on packs at all. Each scan produces a new Scan uuid (backend/src/phases/scan.py), so running the same scan twice yields two distinct packs with no dedup/reuse of a 'current' pack. The 'another user or repository, same version -> distinct pack' sub-item is not expressible because no user model exists. No test covers release-pack idempotency."
     },
     {
       "id": "C6",
@@ -73,7 +78,8 @@
         "Keyboard and accessibility inspection identifies the loading skeleton and error/retry state with meaningful accessible text."
       ],
       "passes": false,
-      "priority": 3
+      "priority": 3,
+      "evidence": "GET /api/scans is not implemented: frontend/app/api/scans/route.ts exports POST only (Next returns 405 for GET, not 401), and backend/src/routes.py has no GET /api/scans route. There is no per-user scan list. Positive parts: frontend/lib/labels.ts maps raw tokens to human wording ('Manual scan \u2014 No release needed' for source=manual/result=non_release) with labels.test.ts asserting the string 'Non Release manual' is never produced, and app/operations/page.tsx renders utc(started_at)/utc(finished_at) timestamps on every operation. But the required GET /api/scans 401/scoped-list behavior fails, and the 24x24px mobile target measurement and skeleton/error accessible-text inspection are not exercised by any browser test (the e2e mobile test only checks headings and absence of horizontal scroll)."
     },
     {
       "id": "C7",
@@ -85,7 +91,8 @@
         "Search the documentation and tracked examples; no real secret or OAuth token value is present."
       ],
       "passes": false,
-      "priority": 3
+      "priority": 3,
+      "evidence": "The docs materially misdescribe authentication and isolation. README.md 'Route policy and the multi-user model' states 'Protected API routes answer 401 without a session, a generic 403 for a cross-user resource, and 429 when the caller is at the scan-concurrency limit' and 'Protected dashboard routes redirect to /settings/github when the browser has no session'; backend/src/OPERATIONS.md states 'Every domain row ... is owned by a user_id' and 'A manual scan over the limit is refused with 429'. Live testing shows POST /api/scans -> 201 and PUT /api/schedule -> 200 with no session, no user_id column exists, and MAX_CONCURRENT_SCANS is enforced nowhere \u2014 none of the described behavior exists. Accurate portions: health and OAuth entry/callback are correctly identified as public; separate backend/frontend Vercel roots and RELEASE_MANAGER_API_URL server-only are correct; all env-var names, 'python -m src.migrate' migration step and the four verification commands are listed; GITHUB_TOKEN/GITHUB_OWNER/GITHUB_REPO are correctly called legacy compatibility names; and env examples contain only placeholders (tests/test_docs_policy.py passes, no real secrets)."
     },
     {
       "id": "C8",
@@ -97,8 +104,9 @@
         "Run `npm --prefix frontend run build`; the production Next.js build exits successfully.",
         "Confirm no deployment command ran and no cloud resource or deployment artifact was created."
       ],
-      "passes": false,
-      "priority": 1
+      "passes": true,
+      "priority": 1,
+      "evidence": ".venv/bin/python -m pytest -q -> 56 passed. npm --prefix frontend test (vitest run) -> 7 passed (3 files). npm --prefix frontend run test:e2e -> 14 passed using loopback servers 127.0.0.1:18000/13000 and tests/fakes.py deterministic OAuth+GitHub doubles. npm --prefix frontend run build -> Next.js 15.5.10 production build compiled and generated 14 routes successfully. No deployment command was run and no cloud resource or deployment artifact was created; git working tree remained clean throughout."
     }
   ],
   "note": "The definition of done. Later phases may ONLY flip `passes`. Editing or removing a criterion is a gate failure."
