@@ -7,9 +7,11 @@ async function operationCount(page: Page) {
 
 async function connectAndSelect(page: Page) {
   await page.goto('/settings/github');
-  if (await page.getByText('Connected as').count()) return;
-  await page.getByRole('link', {name:'Continue with GitHub'}).click();
-  await expect(page.getByText('Connected as')).toBeVisible();
+  if (!await page.getByText('Connected as').count()) {
+    await page.getByRole('link', {name:'Continue with GitHub'}).click();
+    await expect(page.getByText('Connected as')).toBeVisible();
+  }
+  if (await page.getByLabel('Repository').inputValue() === 'fixture/repository-a') return;
   await page.getByLabel('Repository').selectOption('fixture/repository-a');
   await page.getByRole('button', {name:'Save repository'}).click();
   await expect(page.getByRole('status')).toContainText('Saved fixture/repository-a');
