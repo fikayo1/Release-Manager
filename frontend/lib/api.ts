@@ -16,9 +16,11 @@ const base = process.env.RELEASE_MANAGER_API_URL || 'http://127.0.0.1:8000';
 // FastAPI so it can bind the request to a user and enforce same-origin on
 // mutating routes. `RELEASE_MANAGER_API_URL` stays server-only.
 async function forwardedHeaders(): Promise<Record<string, string>> {
-  const forwarded: Record<string, string> = {};
+  const forwarded: Record<string, string> = {'x-release-manager-proxy': 'console'};
   try {
-    const cookie = (await cookies()).toString();
+    const jar = await cookies();
+    // CookieStore.toString() is not consistently populated in server actions.
+    const cookie = jar.getAll().map(({name, value}) => `${name}=${value}`).join('; ');
     if (cookie) forwarded.cookie = cookie;
   } catch {
     /* outside a request scope */

@@ -44,6 +44,105 @@ class Store:
         finally:
             db.close()
 
+    # Multi-user identity is kept in additive tables so existing installations
+    # migrate without rewriting immutable release evidence.
+    def bind_session(self, session_id, login, account_id, now):
+        user_id = "github:" + str(account_id)
+        with self.connect() as db:
+            db.execute("INSERT INTO users(id,login,account_id,created_at) VALUES(?,?,?,?) ON CONFLICT(account_id) DO UPDATE SET login=excluded.login",
+                       (user_id, login, str(account_id), now))
+            db.execute("INSERT INTO user_sessions(session_id,user_id,created_at) VALUES(?,?,?) ON CONFLICT(session_id) DO UPDATE SET user_id=excluded.user_id",
+                       (session_id, user_id, now))
+        return user_id
+
+    def session_user(self, session_id):
+        if not session_id:
+            return None
+        with self.connect() as db:
+            row = db.execute("SELECT user_id FROM user_sessions WHERE session_id=?", (session_id,)).fetchone()
+            return row["user_id"] if row else None
+
+    def save_user_github_connection(self, user_id, login, account_id, access_token, refresh_token, expires_at, now):
+        with self.connect() as db:
+            previous = db.execute("SELECT selected_repository FROM user_github_connections WHERE user_id=?", (user_id,)).fetchone()
+            selected = previous["selected_repository"] if previous else None
+            db.execute("""INSERT INTO user_github_connections VALUES(?,?,?,?,?,?,?,'connected',?)
+                ON CONFLICT(user_id) DO UPDATE SET login=excluded.login,account_id=excluded.account_id,
+                access_token=excluded.access_token,refresh_token=excluded.refresh_token,
+                expires_at=excluded.expires_at,status='connected',updated_at=excluded.updated_at""",
+                (user_id, login, str(account_id), encrypt_token(access_token, key=self.token_key),
+                 encrypt_token(refresh_token, key=self.token_key), expires_at, selected, now))
+
+    def user_github_credentials(self, user_id):
+        with self.connect() as db:
+            row = db.execute("SELECT access_token,refresh_token,expires_at,status FROM user_github_connections WHERE user_id=?", (user_id,)).fetchone()
+            if not row: return None
+            data = dict(row)
+            data["access_token"] = decrypt_token(data.get("access_token"), key=self.token_key)
+            data["refresh_token"] = decrypt_token(data.get("refresh_token"), key=self.token_key)
+            return data
+
+    def user_github_connection(self, user_id):
+        with self.connect() as db:
+            row = db.execute("SELECT login,account_id,selected_repository,status,updated_at FROM user_github_connections WHERE user_id=?", (user_id,)).fetchone()
+            return dict(row) if row else None
+
+    def select_user_repository(self, user_id, full_name, now):
+        with self.connect() as db:
+            if db.execute("UPDATE user_github_connections SET selected_repository=?,updated_at=? WHERE user_id=? AND status='connected'", (full_name, now, user_id)).rowcount != 1:
+                raise StateError("GitHub connection requires reconnect")
+
+    def own(self, kind, resource_id, user_id):
+        with self.connect() as db:
+            db.execute("INSERT INTO resource_owners(kind,resource_id,user_id) VALUES(?,?,?) ON CONFLICT(kind,resource_id) DO NOTHING", (kind, resource_id, user_id))
+
+    def resource_owner(self, kind, resource_id):
+        with self.connect() as db:
+            row = db.execute("SELECT user_id FROM resource_owners WHERE kind=? AND resource_id=?", (kind, resource_id)).fetchone()
+            return row["user_id"] if row else None
+
+    def owns(self, kind, resource_id, user_id):
+        return self.resource_owner(kind, resource_id) == user_id
+
+    def scoped_operations(self, user_id):
+        owned = {r["resource_id"] for r in self._owned_rows("operation", user_id)}
+        # Scheduler operations predate ownership assignment and are trusted,
+        # non-browser work; include only those matching this user's repository.
+        connection = self.user_github_connection(user_id)
+        repository = connection.get("selected_repository") if connection else None
+        return [item for item in self.operations()
+                if item["id"] in owned or (item["source"] == "scheduled" and item["repository"] == repository)]
+
+    def scoped_scans(self, user_id):
+        with self.connect() as db:
+            rows = db.execute("""SELECT s.data,s.created_at FROM scans s JOIN resource_owners o
+                ON o.kind='scan' AND o.resource_id=s.id WHERE o.user_id=? ORDER BY s.created_at DESC,s.id DESC""", (user_id,)).fetchall()
+            return [{**json.loads(r["data"]), "created_at": r["created_at"]} for r in rows]
+
+    def scoped_packs(self, user_id):
+        owned = {r["resource_id"] for r in self._owned_rows("pack", user_id)}
+        return [item for item in self.packs() if item["id"] in owned]
+
+    def _owned_rows(self, kind, user_id):
+        with self.connect() as db:
+            return db.execute("SELECT resource_id FROM resource_owners WHERE kind=? AND user_id=?", (kind,user_id)).fetchall()
+
+    def running_count(self, user_id, now):
+        with self.connect() as db:
+            db.execute("DELETE FROM user_scan_leases WHERE expires_at<=?", (now,))
+            return db.execute("SELECT COUNT(*) AS n FROM user_scan_leases WHERE user_id=?", (user_id,)).fetchone()["n"]
+
+    def acquire_user_lease(self, user_id, operation_id, now, expires, limit):
+        with self.connect() as db:
+            db.execute("DELETE FROM user_scan_leases WHERE expires_at<=?", (now,))
+            count = db.execute("SELECT COUNT(*) AS n FROM user_scan_leases WHERE user_id=?", (user_id,)).fetchone()["n"]
+            if count >= limit: return False
+            db.execute("INSERT INTO user_scan_leases VALUES(?,?,?,?)", (user_id,operation_id,expires,now))
+            return True
+
+    def release_user_lease(self, operation_id):
+        with self.connect() as db: db.execute("DELETE FROM user_scan_leases WHERE operation_id=?", (operation_id,))
+
     def create_oauth_state(self, digest, session_id, created_at, expires_at):
         with self.connect() as db:
             db.execute("DELETE FROM oauth_states WHERE expires_at<?", (created_at,))

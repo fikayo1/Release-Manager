@@ -53,6 +53,7 @@ def create_app(settings: Settings | None = None, github=None, validate: bool = T
                                                     cfg.oauth_callback_url, cfg.session_secret, cfg.secure_cookie)
                     app.state.account_client_factory = account_client_factory or GitHubAccountClient
                     repository_factory = github_client_factory or GitHubClient
+                    app.state.github_client_factory = repository_factory
 
                     def provider(slug):
                         credentials = app.state.store.github_credentials()

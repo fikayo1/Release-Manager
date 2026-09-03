@@ -49,6 +49,16 @@ MIGRATIONS = {
             "CREATE TABLE IF NOT EXISTS oauth_states(state_digest TEXT PRIMARY KEY, session_id TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, consumed_at TEXT)",
             "CREATE INDEX IF NOT EXISTS oauth_states_expiry ON oauth_states(expires_at)",
         ]),
+        (4, [
+            "CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY, login TEXT NOT NULL, account_id TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL)",
+            "CREATE TABLE IF NOT EXISTS user_sessions(session_id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), created_at TEXT NOT NULL)",
+            "CREATE TABLE IF NOT EXISTS user_github_connections(user_id TEXT PRIMARY KEY REFERENCES users(id), login TEXT NOT NULL, account_id TEXT, access_token TEXT NOT NULL, refresh_token TEXT, expires_at TEXT, selected_repository TEXT, status TEXT NOT NULL DEFAULT 'connected', updated_at TEXT NOT NULL)",
+            "CREATE TABLE IF NOT EXISTS resource_owners(kind TEXT NOT NULL, resource_id TEXT NOT NULL, user_id TEXT NOT NULL REFERENCES users(id), PRIMARY KEY(kind,resource_id))",
+            "CREATE INDEX IF NOT EXISTS resource_owners_user ON resource_owners(user_id,kind)",
+            "CREATE TABLE IF NOT EXISTS user_schedules(user_id TEXT PRIMARY KEY REFERENCES users(id), expression TEXT NOT NULL, enabled INTEGER NOT NULL, updated_at TEXT NOT NULL)",
+            "CREATE TABLE IF NOT EXISTS user_scan_leases(user_id TEXT NOT NULL REFERENCES users(id), operation_id TEXT PRIMARY KEY, expires_at TEXT NOT NULL, heartbeat_at TEXT NOT NULL)",
+            "CREATE TABLE IF NOT EXISTS pack_keys(user_id TEXT NOT NULL, repository TEXT NOT NULL, version TEXT NOT NULL, pack_id TEXT NOT NULL UNIQUE REFERENCES packs(id), PRIMARY KEY(user_id,repository,version))",
+        ]),
     ),
     "postgres": (
         (1, [
@@ -67,6 +77,16 @@ MIGRATIONS = {
             "CREATE TABLE IF NOT EXISTS github_connection(id INTEGER PRIMARY KEY CHECK(id=1), login TEXT NOT NULL, account_id TEXT, access_token TEXT NOT NULL, refresh_token TEXT, expires_at TEXT, selected_repository TEXT, status TEXT NOT NULL DEFAULT 'connected', updated_at TEXT NOT NULL)",
             "CREATE TABLE IF NOT EXISTS oauth_states(state_digest TEXT PRIMARY KEY, session_id TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, consumed_at TEXT)",
             "CREATE INDEX IF NOT EXISTS oauth_states_expiry ON oauth_states(expires_at)",
+        ]),
+        (4, [
+            "CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY, login TEXT NOT NULL, account_id TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL)",
+            "CREATE TABLE IF NOT EXISTS user_sessions(session_id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), created_at TEXT NOT NULL)",
+            "CREATE TABLE IF NOT EXISTS user_github_connections(user_id TEXT PRIMARY KEY REFERENCES users(id), login TEXT NOT NULL, account_id TEXT, access_token TEXT NOT NULL, refresh_token TEXT, expires_at TEXT, selected_repository TEXT, status TEXT NOT NULL DEFAULT 'connected', updated_at TEXT NOT NULL)",
+            "CREATE TABLE IF NOT EXISTS resource_owners(kind TEXT NOT NULL, resource_id TEXT NOT NULL, user_id TEXT NOT NULL REFERENCES users(id), PRIMARY KEY(kind,resource_id))",
+            "CREATE INDEX IF NOT EXISTS resource_owners_user ON resource_owners(user_id,kind)",
+            "CREATE TABLE IF NOT EXISTS user_schedules(user_id TEXT PRIMARY KEY REFERENCES users(id), expression TEXT NOT NULL, enabled INTEGER NOT NULL, updated_at TEXT NOT NULL)",
+            "CREATE TABLE IF NOT EXISTS user_scan_leases(user_id TEXT NOT NULL REFERENCES users(id), operation_id TEXT PRIMARY KEY, expires_at TEXT NOT NULL, heartbeat_at TEXT NOT NULL)",
+            "CREATE TABLE IF NOT EXISTS pack_keys(user_id TEXT NOT NULL, repository TEXT NOT NULL, version TEXT NOT NULL, pack_id TEXT NOT NULL UNIQUE REFERENCES packs(id), PRIMARY KEY(user_id,repository,version))",
         ]),
     ),
 }

@@ -4,7 +4,7 @@ export async function PUT(request:NextRequest){
   const body=await request.text();
   // Forward the browser session and origin so FastAPI can bind the request to
   // a user and enforce same-origin on this mutating route.
-  const headers:Record<string,string>={'content-type':'application/json'};
+  const headers:Record<string,string>={'content-type':'application/json','x-release-manager-proxy':'console'};
   const cookie=request.headers.get('cookie');
   if(cookie) headers.cookie=cookie;
   const origin=request.headers.get('origin');
