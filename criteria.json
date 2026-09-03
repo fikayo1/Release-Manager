@@ -8,8 +8,9 @@
         "Confirm the page includes a header, hero, product explanation, five-phase workflow, benefits or outcomes, Shipyard introduction, final call-to-action area, and footer.",
         "Confirm the workflow visibly names scan, draft, review, publish, and rollback."
       ],
-      "passes": false,
-      "priority": 1
+      "passes": true,
+      "priority": 1,
+      "evidence": "Started the production Next.js server and opened `/` signed out; it returned 200 with header and footer markup, hero CTAs, product explanation, benefits content, Shipyard content, final CTA content, and the five visible workflow names Scan, Draft, Review, Publish, and Rollback. The existing Playwright marketing test also passed and verified the shared chrome, hero, workflow order, and narrative section headings."
     },
     {
       "id": "C2",
@@ -19,8 +20,9 @@
         "Activate the product-access CTA and confirm it reaches `/login`.",
         "Return to `/`, activate the informational CTA, and confirm it reaches `/about`."
       ],
-      "passes": false,
-      "priority": 1
+      "passes": true,
+      "priority": 1,
+      "evidence": "Using Playwright against the running production server, clicked the first `Open the console` hero CTA and observed `/login`, then returned to `/`, clicked `Why we built it`, and observed `/about`."
     },
     {
       "id": "C3",
@@ -30,8 +32,9 @@
         "Confirm it explicitly says Release Manager is built by Shipyard.",
         "Confirm it identifies Shipyard as a product-building platform by Herald and relates it to governed, reviewable delivery."
       ],
-      "passes": false,
-      "priority": 1
+      "passes": true,
+      "priority": 1,
+      "evidence": "Direct signed-out GET `/about` returned 200. The rendered page contained `Release Manager is built by Shipyard`, governance/reviewable-delivery language, and the Herald product-platform statement. The existing Playwright assertion for `Shipyard is Herald's product-building platform` passed."
     },
     {
       "id": "C4",
@@ -41,8 +44,9 @@
         "Confirm a clearly visible \u201cComing soon\u201d label or message is present.",
         "Confirm there is no active contact form and that a visitor can navigate back to the home or About page."
       ],
-      "passes": false,
-      "priority": 1
+      "passes": true,
+      "priority": 1,
+      "evidence": "Direct signed-out GET `/contact` returned 200 and remained internal. The rendered page visibly contained `Coming soon`, had no `<form>`, and included an internal back-to-product link. The Playwright test also confirmed no form, no mailto/external link, and a working `/` destination."
     },
     {
       "id": "C5",
@@ -52,8 +56,9 @@
         "Check the pages at a mobile viewport and confirm content remains readable without horizontal scrolling or overlapping controls.",
         "Navigate interactive controls using only the keyboard and confirm each receives a visible focus indicator."
       ],
-      "passes": false,
-      "priority": 2
+      "passes": true,
+      "priority": 2,
+      "evidence": "The full Playwright suite passed (25 tests). Browser checks confirmed shared primary and footer navigation on `/`, `/about`, and `/contact`, with links to `/`, `/about`, `/contact`, and `/login`. Additional checks at 360x740 found no horizontal overflow or overlapping interactive controls on all three pages. Keyboard tabbing reached every visible interactive control on each page, and computed styles showed a visible gold 3px focus ring on links; prominent button links retained a visible raised-state shadow while focused."
     },
     {
       "id": "C6",
@@ -63,8 +68,9 @@
         "Confirm an unauthenticated visit to `/dashboard` continues to redirect to `/login`.",
         "Run `.venv/bin/python -m pytest -q && (test ! -f frontend/package.json || (npm --prefix frontend test && npm --prefix frontend run test:e2e && npm --prefix frontend run build))` and confirm it exits successfully."
       ],
-      "passes": false,
-      "priority": 1
+      "passes": true,
+      "priority": 1,
+      "evidence": "On the running production server, `/login` returned 200 and displayed `Continue with GitHub`; an unauthenticated `/dashboard` request returned 307 with location `http://localhost:13000/login`. Ran the exact required chained verification command; it exited 0. Python tests, frontend unit tests, all 25 Playwright tests, and the Next.js production build succeeded; the build generated `/`, `/about`, `/contact`, `/login`, and protected dashboard routes."
     }
   ],
   "note": "The definition of done. Later phases may ONLY flip `passes`. Editing or removing a criterion is a gate failure."
