@@ -1,295 +1,559 @@
-# GitHub OAuth and repository-targeting completion — implementation plan
+# Production hardening for Release Manager — implementation plan
 
-> This plan supersedes the earlier "operator dashboard" plan for the current
-> increment. The prior plan remains in git history (commit `5244a2de` and
-> around `923227c7`). No routes, screens, workflow states, or operator
-> behavior are redesigned here — this increment only *finishes and proves*
-> the existing GitHub OAuth / repository-selection / scan-targeting flow with
-> deterministic doubles and a token canary.
+> This plan supersedes the earlier "GitHub OAuth and repository-targeting
+> completion" plan (kept in git history). That increment is delivered:
+> `tests/fakes.py`, `tests/e2e_app.py`, `tests/test_oauth_flow.py`,
+> `tests/test_repository_targeting.py`, `frontend/e2e/oauth.spec.ts`, and
+> `frontend/e2e/repository-targeting.spec.ts` already exist and pass. This
+> increment turns the single-tenant service into a multi-user product while
+> keeping the two deployable roots (`backend` FastAPI, `frontend` Next.js) and
+> every existing route path, screen, and workflow state.
+>
+> Designed against `criteria.json` C1–C8 (unedited). No implementation code is
+> written in this phase.
 
 ## Objective
 
-Close `criteria.json` C1–C7 without changing product surface:
+Close C1–C8 without redesigning the product surface:
 
-- Existing entry points stay exactly as-is: `/auth/github`, `/auth/github/callback`,
-  `/settings/github`, `/settings/schedule`, `Scan now`, the schedule controls, and
-  the pack approve/reject/publish/reconcile actions (`src/routes.py`,
-  `frontend/app/settings/github/page.tsx`, `frontend/components/*`).
-- Automated acceptance runs entirely offline against deterministic OAuth + GitHub
-  doubles and a single distinctive fake access-token canary. No live GitHub
-  credentials, no network.
-- Persistence and targeting scenarios run against a real on-disk operator
-  database (the process's configured `RELEASE_MANAGER_DB`), including the records
-  the scenarios themselves create — not an isolated synthetic-only database.
-- After OAuth the access token stays backend-only: the canary must be absent from
-  browser-visible URLs, rendered content, browser-observed response bodies, Web
-  Storage, browser console output, and captured backend/frontend process logs.
-- Selecting repository B after A-targeted work exists retargets only the next
-  manual scan and the next due scheduled scan; it never retargets existing A work
-  (reconcile, rollback/reject, approval, publication).
-- All four gates stay green: `pytest -q`, `npm --prefix frontend test`,
-  `npm --prefix frontend run test:e2e`, `npm --prefix frontend run build`.
+1. **C1 dashboard resilience** — `/`, `/releases`, `/operations` always settle
+   into content or a bounded, retryable error; never an indefinite spinner.
+2. **C2 state-change protection** — every scan trigger and mutating route
+   enforces authentication (401), ownership (generic 403), same-origin request
+   protection, and a per-user scan-concurrency limit (429, no GitHub call);
+   trusted scheduled scans stay `CRON_SECRET`-only and concurrency-exempt.
+3. **C3 identity isolation** — two independently authenticated GitHub accounts
+   have isolated connections, repositories, records, actions, and
+   encrypted-at-rest tokens; the token canary is never plaintext in the DB,
+   browser payloads, or logs.
+4. **C4 route matrix** — every sidebar route, `/releases/{id}`, and the
+   `/github` / `/schedule` compatibility aliases are directly loadable and
+   refresh-safe.
+5. **C5 pack idempotency** — release packs are unique per (user, repository,
+   version); rescan updates/reuses the current pack; scan + audit history is
+   retained.
+6. **C6 polished operations** — human-readable operation labels + timestamps,
+   `GET /api/scans` (401 unauthenticated, own-scans-only authenticated), ≥24px
+   mobile interactive targets, accessible skeleton and error/retry states.
+7. **C7 operator docs** — route policy, one-account-per-user identity boundary,
+   token protection, concurrency limit, scheduler auth + exemption, all
+   environment-variable **names**, migration + verification steps, two Vercel
+   project roots with a server-only backend URL, and the legacy/compatibility
+   status of `GITHUB_TOKEN` / `GITHUB_OWNER` / `GITHUB_REPO`. No values.
+8. **C8 offline verification** — all four gates pass with no deployment and no
+   cloud resource creation.
 
-## Current state (what already exists and is kept)
+## Current state (what exists and constrains the design)
 
-- `src/github_oauth.py` — `OAuthService`: signed opaque session cookie, hashed
-  state, `token_request` injection hook. **Unchanged** (secure-cookie behaviour
-  preserved).
-- `src/github_client.py` — `GitHubAccountClient` (`user()`, `repositories()`),
-  `GitHubClient` (scan reads + `create_release` + `release_for_tag`), token
-  redaction in `__repr__` and `_safe`.
-- `src/routes.py` — `/auth/github`, `/auth/github/callback`, `GET /api/github`,
-  `PUT /api/github/repository`, `POST /api/scans`, pack actions.
-- `src/store.py` — `save_github_connection`, `github_connection()` (credential
-  columns excluded), `github_credentials()`, `select_repository()`,
-  `mark_github_revoked()`; `migrations.py` migration 3 creates
-  `github_connection` / `oauth_states`.
-- `src/operations.py` `OperationRunner` — resolves the repository from
-  `store.github_connection()["selected_repository"]` at run start via
-  `client_provider`; captures it on the scan. `src/scheduler.py` drives the same
-  runner with `source="scheduled"`.
-- `src/phases/scan.py` records `f"{github.owner}/{github.repo}"` on the `Scan`;
-  `src/routes.py::client_for_pack` re-resolves credentials against the
-  scan-captured repository for pack actions (so A work stays A).
-- `tests/e2e_app.py` — deterministic OAuth + GitHub doubles + `/test/*` endpoints,
-  started only by Playwright.
-- `frontend/e2e/dashboard.spec.ts` — already exercises much of the OAuth +
-  targeting path; kept, with overlap trimmed once dedicated specs exist.
+- **No user concept.** `github_connection`, `schedules`, `scheduler_state`, and
+  `scan_lease` are hard singletons (`id=1 CHECK(id=1)`). `scans`, `packs`,
+  `operations`, `decisions`, `attempts`, `reconciliations`, `audit` have no
+  owner column. `store.audit()` and `GET /` return **global** audit.
+- **Session cookie already exists.** `OAuthService` issues a signed, opaque,
+  HttpOnly `release_manager_session` cookie (SameSite=Lax, Secure when
+  `web_url` is https). Today it only binds OAuth `state`; it is never mapped to
+  an identity, and `lib/api.ts` / most Next route handlers **do not forward it**
+  to FastAPI.
+- **Tokens are plaintext.** `github_connection.access_token` is stored raw;
+  `store.github_connection()` already excludes credential columns from the
+  browser-facing view, and `store.github_credentials()` returns the raw token
+  server-side only.
+- **Scan concurrency** is a single global lease in `OperationRunner` /
+  `store.acquire_lease` (`scan_lease` singleton). Scheduled and manual scans
+  share it. `Scheduler` evaluates one global schedule.
+- **Repository targeting** is captured on the `Scan` and re-resolved for pack
+  actions via `client_for_pack` — this behavior must be preserved per-user.
+- **Deploy topology** is already two Vercel roots: `backend/vercel.json`
+  rewrites `/(.*)` → its own `api/index.py`; `frontend/vercel.json` has only the
+  Next build + the cron proxy; `RELEASE_MANAGER_API_URL` is `server-only`
+  (`lib/api.ts` imports `server-only`). `tests/test_deployment_config.py`
+  guards this. **Preserve it exactly.**
+- **Fakes** in `tests/fakes.py` provide one OAuth identity, `CANARY_TOKEN`,
+  `REPO_A`/`REPO_B`, a `Journal`, and `seed_pack`. `tests/e2e_app.py` exposes
+  `/test/*` controls and runs a real on-disk SQLite DB.
+- **Gates** (from `init.sh`): `.venv/bin/python -m pytest -q` &&
+  `npm --prefix frontend test` && `npm --prefix frontend run test:e2e` &&
+  `npm --prefix frontend run build`.
 
-## Gaps this increment closes
+## Design decisions (read before implementing)
 
-1. The fixture token `"browser-test-token"` is not a distinctive canary and is not
-   asserted-absent from logs / storage / bodies.
-2. The GitHub double has no observable, resettable **request journal** covering
-   authorization, token exchange, repository listing, and per-repository scan
-   reads / writes / tag lookups keyed by repository full name.
-3. The double's `RepositoryGitHub` is not repository-aware for reconcile
-   (`release_for_tag`) and does not record which repo each call targeted.
-4. No backend test proves: OAuth completion through doubles, canary absent from
-   API responses, selection survival across a fresh process on the same DB file,
-   and A-work actions never calling the B double.
-5. No Playwright spec dedicated to C2 (canary containment incl. captured server
-   logs) or to C4/C5/C6 as isolated, journal-asserted scenarios, or to a **real
-   backend process restart** (C3).
-6. Playwright does not currently capture backend/frontend stdout+stderr to a file
-   a test can assert against.
+- **Identity = one GitHub account.** A `users` row keyed by GitHub `account_id`
+  (unique, immutable). OAuth callback upserts the user and binds the current
+  signed session → `user_id` in a persistent `sessions` table. No orgs, teams,
+  or roles anywhere. Missing/invalid session → **401**; valid session acting on
+  another user's resource → **generic 403** with no resource detail.
+- **Same-origin protection.** Mutating routes (`POST`/`PUT`/`DELETE`) require an
+  `Origin` (fallback `Referer`) header whose scheme+host matches
+  `RELEASE_MANAGER_WEB_URL`. Every Next route handler forwards the browser
+  `origin` and `cookie` headers to FastAPI. `POST /scheduler/tick` is exempt
+  (authenticated by `CRON_SECRET` + Vercel proof header, unchanged).
+- **Scan concurrency.** New `MAX_CONCURRENT_SCANS` setting: default **1**,
+  validated to `1..10` (out-of-range → clamp + a startup-safe note; never
+  crash health). `scan_lease` generalized to allow up to N rows **per user**;
+  `POST /api/scans` (and the backend scan alias) refuse with **429** and make
+  **no GitHub call** when the user is at the limit. `source="scheduled"` runs
+  (only reachable through `CRON_SECRET`) bypass the per-user counter and keep
+  their existing durable per-slot uniqueness. Each user has an independent
+  allowance.
+- **Token encryption at rest.** New `src/crypto.py` using the Python standard
+  library only (no new dependency): per-record random nonce, an
+  HMAC-SHA256–derived keystream (CTR construction) for confidentiality, and an
+  HMAC-SHA256 tag for integrity. Key material comes from `TOKEN_ENCRYPTION_KEY`
+  if set, otherwise an HKDF-style derivation from the already-required
+  `SESSION_SECRET` with a fixed domain-separation label. `github_credentials()`
+  decrypts; `github_connection()` still never returns credential columns.
+  Stored `access_token` / `refresh_token` ciphertext is opaque base64 — the
+  canary string never appears verbatim in the DB file.
+- **Pack idempotency.** Add a partial unique index on
+  `packs(user_id, repository, version)` for the *current* (non-superseded)
+  pack. `draft()` becomes an upsert: if a current pack already exists for that
+  (user, repo, version) it is updated/reused (same `id`), not duplicated; the
+  new `scan` row and all `audit` rows are still written. `repository` is copied
+  onto the pack from its scan.
+- **Dashboard resilience.** `lib/api.ts` keeps `cache:'no-store'` (stable,
+  predictable) and adds an `AbortController` timeout (~8s, below C1's 10s
+  budget) so a hung backend rejects instead of suspending forever. 401 →
+  typed `UnauthorizedError`; server components catch it and
+  `redirect('/settings/github')`. Other failures propagate to a route
+  `error.tsx` boundary. Skeletons use fixed dimensions (no layout shift),
+  `role="status"`, `aria-busy`, and meaningful text; error states use
+  `role="alert"` and a `Retry` button wired to `reset()`.
+- **Route aliases.** `/github` → `/settings/github` and `/schedule` →
+  `/settings/schedule` via `next.config.mjs` `redirects()` (307, refresh- and
+  bookmark-safe). Unauthenticated protected UI routes redirect to
+  `/settings/github` via `middleware.ts` (cookie-presence check) with page-level
+  401→redirect as defense in depth.
+- **Migrations stay additive.** One new version (4) with parallel SQLite and
+  Postgres statement lists; idempotent; run under the existing advisory lock.
+  Existing rows backfill to a single synthetic `legacy` user so SQLite
+  dev/CI data remains queryable; production Postgres starts empty.
+- **Never** deploy, invent credentials, or write secret values into any file.
 
 ## Files to create
 
-### Shared deterministic doubles
+### Backend — source
 
-- `tests/fakes.py` — single source of truth for the doubles, imported by both
-  `tests/e2e_app.py` and the new backend tests:
-  - `CANARY_TOKEN` — one distinctive, obviously-fake access token string
-    (e.g. `ghp_FaKeCaNaRy0000NeverLogMe0000DEADBEEFcafe`), plus `OTHER_REPO`
-    helpers.
-  - `Journal` — append-only list of `{kind, repository, detail}` entries with
-    `record()`, `entries()`, `reset()`, and `for_repo(name)` filters.
-  - `FakeOAuth(OAuthService)` — deterministic `token_request` returning
-    `{"access_token": CANARY_TOKEN}` only for the accepted code; overrides
-    `begin()` to point at the fixture's local `/test/github/authorize`; records
-    `authorize` and `token_exchange` journal entries. No cookie/session changes.
-  - `FakeAccountGitHub(GitHubAccountClient)` — injected transport serving two real
-    `/user/repos` pages (`fixture/repository-a` private, `fixture/repository-b`
-    public) and `/user`; asserts `Authorization: Bearer <CANARY_TOKEN>`; records
-    `user` and `repos_page` journal entries; raises `AssertionError` on any
-    non-`api.github.com` / unexpected URL (proves no live GitHub).
-  - `FakeRepositoryGitHub` — repository-aware scan reads, `create_release`,
-    `release_for_tag`; every method records a journal entry tagged with
-    `f"{owner}/{repo}"`; asserts the token is `CANARY_TOKEN`. Deterministic
-    release-worthy evidence for repo A and repo B, distinguishable per repo.
-  - `seed_pack(store, pack_id, repository, status, *, tag=...)` — insert an
-    A-targeted `Scan` + pack + operation directly in the states where reconcile
-    (`publishing`/`uncertain`), rollback/reject (`pending`), approval
-    (`pending`), and publish (`pending`) are each applicable, mirroring
-    `tests/test_review_ui.add_pack` conventions.
+- `backend/src/identity.py`
+  - `SessionError` (→ 401) and `OwnershipError` (→ 403, generic message).
+  - `current_user(request)` FastAPI dependency: read + verify the signed
+    session cookie via `request.app.state.oauth`, resolve
+    `store.user_for_session(session_id)`; raise `SessionError` if absent.
+  - `require_same_origin(request)` dependency: compare `Origin`/`Referer` to
+    `settings.web_url`; raise `OwnershipError`/400 on mismatch.
+  - `owned_pack(request, user, pack_id)` / `owned_operation(...)` helpers that
+    raise `OwnershipError` when the record's `user_id` differs.
+- `backend/src/crypto.py`
+  - `encrypt_token(plaintext, *, settings) -> str` / `decrypt_token(...)`,
+    stdlib-only, versioned ciphertext prefix, random nonce, integrity tag.
+  - `token_key(settings)` — use `TOKEN_ENCRYPTION_KEY` or derive from
+    `SESSION_SECRET`.
 
-### Backend tests (offline, deterministic, real temp operator DB file)
+### Backend — tests (offline, deterministic, real temp DB)
 
-- `tests/test_oauth_flow.py` — designs to **C1** and the backend half of **C2**:
-  - Drive `GET /auth/github` → `/test/github/authorize` → `GET /auth/github/callback`
-    through `FakeOAuth` + `FakeAccountGitHub` with a real `Settings(database=<tmp
-    file>)` app; assert redirect lands on `…/settings/github?github=connected`.
-  - `GET /api/github` lists repositories A and B; `PUT /api/github/repository`
-    accepts A and rejects an unauthorized slug (422).
-  - Journal shows `authorize`, `token_exchange`, `user`, `repos_page`×2 and **no**
-    entry outside the doubles.
-  - Canary assertion: `CANARY_TOKEN` absent from every response body/header of
-    `/auth/github/callback`, `/api/github`, `/api/github/repository`,
-    `/api/operations`, `/api/releases`; absent from `store.github_connection()`;
-    present only in `store.github_credentials()`. `repr()` of both client classes
-    and any raised `GitHubError` never contains it.
-  - Existing invalid/expired/denied/replayed-state paths still redirect with the
-    existing `github=` status codes (regression guard, no behaviour change).
+- `tests/test_identity_isolation.py` — **C3**: two users via the two-account
+  fake OAuth; disjoint repositories and scans; each API session sees only its
+  own connection, `GET /api/github`, `GET /api/scans`, `/api/releases`,
+  `/api/operations`, `/api/audit`; cross-user read/scan/approve/reject/publish
+  all return generic 403 and change nothing (no record mutation, no GitHub
+  call); no org/team/role path exists.
+- `tests/test_scan_concurrency.py` — **C2**: `POST /api/scans` and the backend
+  scan alias with no session → 401 + zero GitHub calls; at
+  `MAX_CONCURRENT_SCANS=1` a second concurrent user scan → 429 + zero GitHub
+  calls; `MAX_CONCURRENT_SCANS` accepts 1..10 and a value >10 is clamped;
+  user B has an independent allowance; a `CRON_SECRET` scheduled tick during an
+  active user scan runs and is not counted; scheduled tick still 403s without a
+  valid `CRON_SECRET`.
+- `tests/test_same_origin.py` — **C2**: repository selection, scan start,
+  schedule change, approve, reject, publish, reconcile each reject a
+  cross-origin / missing-origin request and accept a matching-origin request;
+  `/scheduler/tick` is unaffected by Origin.
+- `tests/test_pack_idempotency.py` — **C5**: two identical deterministic scans
+  for one (user, repo, version) leave exactly one current pack and no duplicate
+  in `/api/releases`; both scans and their audit rows remain queryable; a
+  second user (or repo) at the same version gets a distinct current pack
+  without touching the first.
+- `tests/test_operations_view.py` — **C6 backend half**: `GET /api/scans`
+  returns 401 unauthenticated and only the caller's scans authenticated;
+  operation records expose the fields the UI needs for a human label + a
+  timestamp for every operation (including `legacy` backfill rows).
+- `tests/test_token_encryption.py` — **C3**: after OAuth the on-disk SQLite
+  file bytes do not contain `CANARY_TOKEN`; `store.github_credentials()`
+  round-trips to `CANARY_TOKEN`; `store.github_connection()` still has no
+  credential columns; `crypto` rejects a tampered ciphertext.
+- `tests/test_migrations_multiuser.py` — migration 4 is additive and
+  idempotent for both dialects (run twice = no-op); legacy rows are backfilled
+  to one `legacy` user; new unique indexes exist.
+- `tests/test_docs_policy.py` — **C7**: README + `OPERATIONS.md` mention public
+  vs protected routes, one-account-per-user ownership, token protection, the
+  scan concurrency limit, scheduler `CRON_SECRET` auth + exemption, separate
+  `backend`/`frontend` Vercel roots, `RELEASE_MANAGER_API_URL` server-only,
+  every required env var name, `python -m src.migrate`, the four verification
+  commands, and the legacy status of `GITHUB_TOKEN`/`GITHUB_OWNER`/
+  `GITHUB_REPO`; and that no `ghp_`/`ghs_`/long-secret material is present.
 
-- `tests/test_repository_targeting.py` — designs to **C3**, **C4**, **C5**, **C6**:
-  - **C3**: connect + select A against a temp DB file; open a *new* `Store` on the
-    exact same path (simulating a fresh process) and assert
-    `github_connection()["selected_repository"] == "fixture/repository-a"` with no
-    re-selection; also assert `GET /api/github` from a freshly built app on that
-    file shows A selected. (The real-process restart is additionally covered in
-    Playwright.)
-  - **C4**: with A selected, run `OperationRunner(...).run("manual")`; retain the
-    A operation/pack. Switch selection to B, `journal.reset()`, run again; assert
-    the new operation's `repository` is B, journal for that scan contains only
-    B-targeted read calls, and the retained A operation/pack still reports A via
-    `store.operation(...)` / `store.pack_detail(...)`.
-  - **C5**: keep B selected, `update_schedule("* * * * *", True, ...)`, run one
-    `Scheduler.tick()` with an injected UTC clock on a due slot; assert exactly
-    one `source="scheduled"` operation for that slot, targeting B, journal
-    B-only, and it reaches `draft_created`.
-  - **C6**: `seed_pack` four A-targeted records; select B; call `approve`+`publish`,
-    `reject`, `publish`, and `reconcile` through `src/routes.py` handlers /
-    `src/phases`; assert every journal entry produced names repo A, never B, and
-    each record stays A-targeted and reaches its expected terminal/recovery state.
-    Assertions read the journal and persisted/API views, not internal mocks.
+### Frontend — source
 
-### Playwright specs (real browser, real processes, deterministic doubles)
+- `frontend/middleware.ts` — redirect unauthenticated requests for protected
+  paths (`/`, `/releases`, `/operations`, `/settings/*`, `/releases/*`) to
+  `/settings/github`; leave `/settings/github`, `/auth/*`, static assets, and
+  API routes alone.
+- `frontend/lib/labels.ts` — `operationTitle(op)`, `sourceLabel(source)`,
+  `statusLabel(value)` mapping raw tokens (`non_release`, `draft_created`,
+  `reconnect_required`, `manual`, `scheduled`, `legacy`, …) to human wording.
+- `frontend/lib/guard.ts` — `loadOrRedirect(fn)` helper: run an `api()` call,
+  catch `UnauthorizedError` → `redirect('/settings/github')`, rethrow the rest.
+- `frontend/components/Skeleton.tsx` — accessible, fixed-dimension skeleton
+  blocks (`role="status"`, `aria-busy`, visually-hidden label), honoring
+  `prefers-reduced-motion`.
+- `frontend/components/RetryableError.tsx` — `role="alert"` message + `Retry`
+  button (≥24px) calling the passed `reset()`.
+- `frontend/app/releases/loading.tsx`, `frontend/app/releases/error.tsx`
+- `frontend/app/operations/loading.tsx`, `frontend/app/operations/error.tsx`
 
-- `frontend/e2e/support/run-logged.mjs` — wrapper: `run-logged.mjs <logfile> -- <cmd…>`
-  spawns the command, tees combined stdout+stderr to `<logfile>` and through to
-  the parent, exits with the child's code. Used for both Playwright `webServer`
-  entries so a test can read the captured logs.
+### Frontend — tests
 
-- `frontend/e2e/support/backend.ts` — helper to `spawn`/`kill` an extra
-  `uvicorn tests.e2e_app:app` process on a dedicated port pointed at a caller-
-  supplied operator DB path, with `waitForHealth()` and `stop()`; used by the
-  restart scenario. Honours an env flag so the *restarted* process does not reset
-  its database.
-
-- `frontend/e2e/oauth.spec.ts` — designs to **C1** + **C2**:
-  - From `/settings/github`, click `Continue with GitHub`, return through the
-    existing callback, assert `Connected as` and that the repository `<select>`
-    offers `fixture/repository-a` and `fixture/repository-b`; select A and save.
-  - Assert `GET /test/github/journal` shows the expected authorize / token /
-    `/user` / `/user/repos` interactions and zero entries outside the doubles.
-  - Throughout callback → settings load → save: collect every `page.on('request')`
-    URL, every response body (`response.text()` where readable), `page.on('console')`
-    output, full rendered `document.documentElement.outerHTML`, and all
-    `localStorage` + `sessionStorage` keys/values; after the run read both
-    captured server log files. Assert `CANARY_TOKEN` appears in **none** of them
-    and not in `page.url()` / the address bar.
-  - Assert the session cookie is still `HttpOnly` (not visible to
-    `document.cookie`) — existing behaviour unchanged.
-
-- `frontend/e2e/repository-targeting.spec.ts` — designs to **C4**, **C5**, **C6**
-  (and the process-restart half of **C3**):
-  - Connect, select A, `Scan now`, keep the A release. `POST /test/github/journal/reset`.
-  - Select B via the existing form, `Scan now`; assert `/test/github/journal`
-    contains B-targeted scan reads and **no** A-targeted request for that scan;
-    open the retained A release and assert its displayed/API repository is still A.
-  - **C5**: enable a deterministically-due schedule through `/settings/schedule`,
-    reset the journal, advance the fixture clock / trigger the due slot via a
-    `/test/*` control that drives the *real* `Scheduler` path; assert one
-    scheduled operation for B reaching `draft_created` and journal B-only.
-  - **C6**: call `/test/seed` to create A-targeted packs in reconcile / reject /
-    approve / publish states; with B selected, perform each action through its
-    existing UI/API entry point; assert `/test/publications` + journal show repo A
-    only and the records stay A-targeted.
-  - **C3 restart**: using `support/backend.ts`, start an extra backend on its own
-    port + operator DB file, complete OAuth + select A against it, `kill` it,
-    start a fresh process on the same DB path, reload its `/api/github` (proxied)
-    and assert A is still selected without re-selecting or re-authorising.
-
-### Playwright frontend unit coverage (if a component changes)
-
-- `frontend/components/GitHubRepositoryForm.test.tsx` — only if the component is
-  touched: no mount-time request, one PUT per explicit save, busy state, backend
-  error surfaced, selection preselected from `selected` prop. (Preferred: leave
-  the component untouched and add no test.)
+- `frontend/lib/api.test.ts` — `api()` forwards the incoming `cookie`, applies
+  the abort timeout (rejects, does not hang), maps 401 → `UnauthorizedError`,
+  409/429 → typed errors with the server `detail`.
+- `frontend/lib/labels.test.ts` — every raw token maps to human wording; the
+  string `Non Release manual` never appears.
+- `frontend/e2e/dashboard-resilience.spec.ts` — **C1**: with a seeded
+  authenticated session, directly load + reload + fresh-navigate `/`,
+  `/releases`, `/operations` ≥10× each, all render expected data; with the
+  backend put in `delay` then `fail` mode via `/test/backend/mode`, an
+  accessible skeleton appears with no material layout movement and the route
+  reaches its error state within 10s; restoring the backend and activating
+  `Retry` renders data without a full browser reload.
+- `frontend/e2e/identity-isolation.spec.ts` — **C3**: two browser contexts sign
+  in as the two fake accounts; each sees only its repositories, scans, packs,
+  operations; cross-user navigation/actions are denied and mutate nothing;
+  token canary absent from every response body, rendered HTML, Web Storage,
+  console, and the captured server logs.
+- `frontend/e2e/route-matrix.spec.ts` — **C4**: authenticated direct load +
+  refresh of `/`, `/releases`, `/operations`, `/settings/github`,
+  `/settings/schedule`, a valid `/releases/{id}` → none 404; `/github` and
+  `/schedule` resolve/redirect to their settings page with a usable
+  refresh/bookmark URL; every sidebar link lands on the intended page.
+- `frontend/e2e/mobile-targets.spec.ts` — **C6**: at a 390px viewport the
+  sidebar, retry, scan, decision, and settings controls each measure ≥24×24
+  CSS px; the skeleton and the error/retry state expose meaningful accessible
+  text to keyboard/AT inspection.
 
 ## Files to update
 
-- `tests/e2e_app.py` — import the doubles from `tests/fakes.py`; use `CANARY_TOKEN`;
-  add endpoints: `GET /test/github/journal`, `POST /test/github/journal/reset`,
-  `POST /test/seed` (A-targeted pack records per state), and a `/test/*` control
-  that advances the scheduler clock / forces the next due slot through the real
-  `Scheduler`. Reset the operator DB only when an explicit env flag is set (so a
-  restarted process keeps its data); keep the DB path from `E2E_DB`.
-- `frontend/playwright.config.ts` — route both `webServer` commands through
-  `support/run-logged.mjs` with per-server log file paths under `e2e/.logs/`;
-  export those paths (env or a shared constant) for specs; keep
-  `reuseExistingServer: false` and the non-skipping single project.
-- `frontend/e2e/dashboard.spec.ts` — trim the OAuth/targeting assertions now
-  owned by the new specs to keep runtime down, but keep at least a smoke path;
-  no coverage is lost overall.
-- `.gitignore` — ignore `frontend/e2e/.logs/` and any temp operator DB files the
-  restart helper creates.
-- `README.md` — document the deterministic-doubles + canary acceptance approach
-  and the operator-DB restart expectation. **Keep** the existing
-  `GITHUB_TOKEN` / `GITHUB_OWNER` / `GITHUB_REPO` legacy-automation section
-  verbatim; keep the four verification commands.
-- `src/OPERATIONS.md` — one paragraph: repository selection is captured at scan
-  start, survives restart on the same DB file, and never retargets existing work;
-  note the legacy `GITHUB_TOKEN`/`GITHUB_OWNER`/`GITHUB_REPO` triple.
+### Backend
 
-Only touch `src/*` if a gate proves a real defect (e.g. a genuine canary leak or
-a targeting bug). Expected default: **no production code change** — this is
-test/fixture/doc completion. Any src change must preserve all current behaviour
-and be justified against a failing criterion.
+- `backend/src/migrations.py` — **migration 4** (sqlite + postgres):
+  - `users(id TEXT PK, github_account_id TEXT UNIQUE NOT NULL, login TEXT, created_at TEXT)`.
+  - `sessions(session_id TEXT PK, user_id TEXT NOT NULL REFERENCES users(id), created_at TEXT, last_seen_at TEXT)`.
+  - Add `user_id` to `github_connection` (drop the `id=1` singleton: PK becomes
+    `user_id`), `scans`, `packs`, `operations`, `schedules` (per-user singleton
+    keyed by `user_id`), `scheduler_state`, `scan_lease` (composite PK
+    `(user_id, operation_id)`), `audit`. `decisions`/`attempts`/
+    `reconciliations` inherit ownership through `packs`.
+  - Partial unique index `packs(user_id, repository, version)` for current
+    packs; keep the `scheduled_for` slot index but scope it per user.
+  - `oauth_states` already carries `session_id` — no change.
+  - Legacy backfill: create one `legacy` user, assign every pre-existing row to
+    it (SQLite path only; Postgres cutover starts empty).
+- `backend/src/store.py` — thread `user_id` through every read/write; new:
+  `upsert_user`, `bind_session`, `user_for_session`, `scans_for_user`,
+  `active_scan_count(user_id)`, per-user `acquire_lease`/`release_lease`,
+  per-user `github_connection`/`github_credentials`/`select_repository`/
+  `save_github_connection` (encrypt on write, decrypt on
+  `github_credentials`), per-user `schedule`/`update_schedule`/
+  `scheduler_state`, `audit(user_id)`, pack upsert-by-identity in `save_pack`.
+- `backend/src/routes.py` —
+  - Attach `current_user` to every protected route; add `require_same_origin`
+    to every mutating route.
+  - New `GET /api/scans` → `store.scans_for_user(user.id)` (401 unauthenticated).
+  - `POST /api/scans` + review-form scan alias: check
+    `store.active_scan_count(user.id) < settings.max_concurrent_scans` before
+    any GitHub work; else `HTTPException(429)`.
+  - `client_for_pack`, pack actions, operation reads: ownership-checked → 403.
+  - Keep `/health`, `/auth/github`, `/auth/github/callback`, `/scheduler/tick`
+    public per their current policy; scope `GET /` to the caller (or reduce to
+    `{"service": "release-manager"}` when unauthenticated) so it never leaks
+    another user's audit.
+  - Map `SessionError`→401, `OwnershipError`→403 via exception handlers.
+- `backend/src/github_oauth.py` — in the callback path (or a thin hook the
+  route calls) `store.upsert_user(account)` then
+  `store.bind_session(session_id, user_id)`. Session/cookie signing unchanged.
+- `backend/src/operations.py` — `OperationRunner` takes `user_id`; resolves
+  *that user's* `github_connection().selected_repository`; per-user lease;
+  `create_operation`/`finish_operation` carry `user_id`; scheduled path passes
+  the schedule owner's `user_id` and skips the per-user concurrency counter.
+- `backend/src/scheduler.py` — iterate enabled per-user schedules; evaluate and
+  claim each due user's slot independently; scheduled runs stay
+  concurrency-exempt; `scheduler_state` updated per user.
+- `backend/src/phases/scan.py`, `backend/src/phases/draft.py`,
+  `backend/src/pack.py` — carry `user_id` + `repository` into the scan and into
+  the idempotent pack upsert.
+- `backend/src/config.py` — add `max_concurrent_scans: int = 1` (env
+  `MAX_CONCURRENT_SCANS`, validate/clamp to 1..10) and
+  `token_encryption_key: str = ""` (env `TOKEN_ENCRYPTION_KEY`, optional);
+  keep `__repr__` redaction (`token_encryption_key` → `'***'`).
+- `backend/src/app.py` — pass the new settings through; `github_provider`
+  becomes `provider(user_id, slug)`; wire `current_user`/exception handlers.
+- `backend/src/migrate.py` — no logic change; covered by the new migration test.
+- `backend/.env.example` — add `MAX_CONCURRENT_SCANS=` and
+  `TOKEN_ENCRYPTION_KEY=` (names + placeholder comments only); note
+  `MAX_CONCURRENT_SCANS=1` for the current Vercel deployment.
+- `backend/api/index.py` — unchanged (re-verify it still just re-exports
+  `create_app(enable_scheduler=False)`).
 
-## Explicitly not changed
+### Backend — shared fakes / e2e app
 
-- `criteria.json` (acceptance phase only).
-- `requirements.txt` and the locked project requirements.
-- `src/github_oauth.py` session/cookie logic.
-- Any route path, screen, workflow state, or operator-visible behaviour.
+- `tests/fakes.py` — add a second OAuth identity (`FakeAccountGitHubB`, e.g.
+  `login="oauth-fixture-b"`, `id=43`, repos `fixture/repo-b-1`,
+  `fixture/repo-b-2` disjoint from user A's `REPO_A`/`REPO_B`); a second
+  distinct `CANARY_TOKEN_B`; `FakeOAuth` selects the identity by an `account`
+  query param on `/test/github/authorize`; `seed_pack(store, ..., user_id=...)`;
+  keep the single-identity helpers working for the existing OAuth/targeting
+  specs.
+- `tests/e2e_app.py` — accept `?account=a|b` through `/test/github/authorize`;
+  add `POST /test/backend/mode` (`normal` | `delay:<ms>` | `fail`) implemented
+  as middleware for C1; make `/test/seed` and `/test/scheduler/tick` user-aware;
+  keep the existing `/test/*` endpoints. DB reset behavior and `E2E_KEEP_DB`
+  unchanged.
+
+### Frontend
+
+- `frontend/lib/api.ts` — forward the request `cookie` (via `next/headers`) and
+  a same-origin `origin` header to FastAPI; add an `AbortController` timeout;
+  map 401→`UnauthorizedError`, 403→`ForbiddenError`, 429→`RateLimitedError`;
+  keep `import 'server-only'` and `cache:'no-store'`.
+- `frontend/app/api/*/route.ts` (`scans`, `github/repository`, `schedule`,
+  `releases/[id]/approve`, `releases/[id]/reject`, and new GET on `scans`) —
+  forward `cookie` + `origin` headers; pass through 401/403/429 with the
+  upstream `detail`; add `GET` to `scans/route.ts` proxying `GET /api/scans`.
+- `frontend/app/page.tsx`, `frontend/app/releases/page.tsx`,
+  `frontend/app/operations/page.tsx`, `frontend/app/releases/[id]/page.tsx`,
+  `frontend/app/settings/github/page.tsx`,
+  `frontend/app/settings/schedule/page.tsx` — load through `loadOrRedirect`;
+  render human labels + a timestamp for every operation on the overview and
+  Operations pages.
+- `frontend/app/loading.tsx`, `frontend/app/error.tsx` — replace the one-line
+  placeholders with `Skeleton` / `RetryableError`.
+- `frontend/components/AppNav.tsx` — ≥24px link targets, current-route
+  `aria-current`; no alias links.
+- `frontend/components/ScanNowButton.tsx` — surface a 429 as "Another scan is
+  already running for your account"; ≥24px button.
+- `frontend/components/GitHubRepositoryForm.tsx`,
+  `frontend/components/DecisionForm.tsx`,
+  `frontend/components/ScheduleForm.tsx` — ≥24px controls; pass through
+  403/429 messages.
+- `frontend/app/globals.css` — `min-height`/`min-width: 24px` (and adequate hit
+  area) for `nav a`, `button`, `.button`, `select`, form controls, retry;
+  skeleton classes with reserved dimensions; `@media (prefers-reduced-motion)`.
+- `frontend/next.config.mjs` — `async redirects()` for `/github` →
+  `/settings/github` and `/schedule` → `/settings/schedule`; keep
+  `output: 'standalone'`.
+- `frontend/e2e/dashboard.spec.ts` — adapt to the authenticated model (browser
+  context now carries a session cookie); trim assertions now owned by the new
+  specs; keep a smoke path.
+- `frontend/e2e/oauth.spec.ts`, `frontend/e2e/repository-targeting.spec.ts`,
+  `frontend/e2e/cron.spec.ts` — update `page.request.*` calls to carry the
+  session cookie / a `CRON_SECRET` header as appropriate; behavior assertions
+  unchanged.
+- `frontend/playwright.config.ts` — add any new fixture env; keep
+  `workers: 1`, `reuseExistingServer: false`, single non-skipping project, the
+  `run-logged.mjs` wrappers, and the log paths.
+- `frontend/.env.example` — unchanged (still only `RELEASE_MANAGER_API_URL` +
+  `CRON_SECRET`); re-confirm the server-only comment.
+- `frontend/vercel.json` — unchanged (cron `0 9 * * *`, no rewrites).
+- `.gitignore` — add `frontend/e2e/.tmp/` if not already ignored.
+
+### Documentation (C7)
+
+- `README.md` — add/expand:
+  - **Route policy**: public = `GET /health`, `GET /auth/github`,
+    `GET /auth/github/callback`; protected UI routes redirect to
+    `/settings/github` when unauthenticated and never render another user's
+    data; protected API routes return 401 (no session) / 403 (cross-user) /
+    429 (scan limit).
+  - **Identity boundary**: one GitHub account = one user; no shared org, team,
+    or application role; connections, tokens, repository selections, scans,
+    packs, operations, decisions, schedules, and audit are per-user.
+  - **Token protection**: OAuth tokens stay server-side, are encrypted at rest,
+    and never appear in browser payloads or logs; `RELEASE_MANAGER_API_URL` is
+    server-only; no `NEXT_PUBLIC_` variables.
+  - **Scan concurrency**: `MAX_CONCURRENT_SCANS` (configurable 1..10; the
+    Vercel deployment uses 1); excess user scans get 429 without calling
+    GitHub; trusted scheduled scans require `CRON_SECRET` and are exempt.
+  - **Environment-variable names** (no values): `DATABASE_URL` /
+    `POSTGRES_URL`, `RELEASE_MANAGER_WEB_URL`, `GITHUB_OAUTH_CLIENT_ID`,
+    `GITHUB_OAUTH_CLIENT_SECRET`, `GITHUB_OAUTH_CALLBACK_URL`, `SESSION_SECRET`,
+    `CRON_SECRET`, `MAX_CONCURRENT_SCANS`, `TOKEN_ENCRYPTION_KEY` (optional),
+    `RELEASE_MANAGER_API_URL` (frontend, server-only),
+    `SCHEDULER_INTERVAL_SECONDS` + `RELEASE_MANAGER_DB` (standalone only).
+  - **Two Vercel projects**: `backend` root (FastAPI, `api/index.py`,
+    self-contained rewrite) and `frontend` root (Next.js + cron proxy). One
+    Next deployment does **not** and cannot route to the Python function
+    through rewrites; the console reaches the API only via the server-only
+    `RELEASE_MANAGER_API_URL`.
+  - **Migration + verification**: `PYTHONPATH=backend .venv/bin/python -m
+    src.migrate` (additive, idempotent, advisory-locked); post-migration
+    verification checklist; the four gate commands.
+  - **`GITHUB_TOKEN` / `GITHUB_OWNER` / `GITHUB_REPO`**: legacy / local
+    topology-compatibility variables only; they are **not** shared production
+    authorization for multi-user operations and are ignored by the OAuth path.
+- `backend/src/OPERATIONS.md` — one section on per-user isolation, the
+  concurrency limit + scheduled exemption, encrypted token storage, and the
+  legacy `GITHUB_TOKEN`/`GITHUB_OWNER`/`GITHUB_REPO` triple status.
+
+## Deployment readiness
+
+- **Build**
+  - Backend: no build step; Vercel installs `backend/requirements.txt`
+    (unchanged — stdlib crypto, no new dependency). Standalone/CI: `./init.sh`.
+  - Frontend: `npm --prefix frontend run build` (`next build`,
+    `output: 'standalone'`).
+- **Start**
+  - Backend standalone: `PYTHONPATH=backend .venv/bin/uvicorn src.app:app
+    --host 127.0.0.1 --port 8000` (keeps the in-process per-user scheduler).
+  - Backend on Vercel: `backend/api/index.py` →
+    `create_app(enable_scheduler=False)`; scheduled work is driven by
+    `POST /scheduler/tick`.
+  - Frontend standalone: `npm --prefix frontend start`; on Vercel: the Next.js
+    runtime plus the `/api/cron/scheduler` cron proxy.
+- **Health / readiness**
+  - `GET /health` → `{"status":"ok"}` only after configuration validation, DB
+    connection, and migrations (now including version 4) succeed; otherwise
+    `503 {"status":"unavailable", "kind": "configuration"|"database", ...}`
+    with no secret values. Unchanged contract; migration set is larger.
+  - Protected routes: 401 (no/invalid session), 403 (cross-user), 429 (scan
+    limit). Protected UI routes redirect to `/settings/github` unauthenticated.
+- **Required environment variables (names only)**
+  - Backend: `DATABASE_URL` or `POSTGRES_URL`; `RELEASE_MANAGER_WEB_URL`;
+    `GITHUB_OAUTH_CLIENT_ID`; `GITHUB_OAUTH_CLIENT_SECRET`;
+    `GITHUB_OAUTH_CALLBACK_URL`; `SESSION_SECRET`; `CRON_SECRET`;
+    `MAX_CONCURRENT_SCANS` (optional, default 1, range 1..10);
+    `TOKEN_ENCRYPTION_KEY` (optional; derived from `SESSION_SECRET` if unset).
+    Standalone-only: `SCHEDULER_INTERVAL_SECONDS`, `RELEASE_MANAGER_DB`.
+  - Frontend: `RELEASE_MANAGER_API_URL` (server-only); `CRON_SECRET`
+    (identical to backend). No `NEXT_PUBLIC_` variables.
+  - Topology-compatibility only, **not** production auth: `GITHUB_TOKEN`,
+    `GITHUB_OWNER`, `GITHUB_REPO`.
+  - No secret values are placed in any tracked file; `.env.example` files carry
+    names + placeholder comments only.
+- **Persistence / runtime assumptions**
+  - Production: managed Postgres (`DATABASE_URL` / `POSTGRES_URL`); every
+    domain row is per-user; migrations are additive, idempotent, and serialized
+    with the Postgres advisory transaction lock (SQLite: immediate
+    transaction). Production cutover starts empty (no SQLite import).
+  - Dev/CI: SQLite fallback; its file contains encrypted OAuth tokens and must
+    still be access-restricted and backed up before upgrades.
+  - OAuth access/refresh tokens are encrypted at rest; sessions are persisted
+    server-side and bound to a `user_id`; the session cookie stays HttpOnly,
+    SameSite=Lax, Secure on https origins.
+  - Serverless has no always-on scheduler; Vercel Cron invokes
+    `GET /api/cron/scheduler` (validates `CRON_SECRET` + `User-Agent:
+    vercel-cron/1.0`) → forwards trusted `POST /scheduler/tick`, which
+    evaluates every user's due slot. Vercel Hobby cron runs once daily
+    (`0 9 * * *`); **Scan now** remains the primary trigger. The Vercel
+    deployment sets `MAX_CONCURRENT_SCANS=1`.
+- **Provider configuration / operator documentation the spec requires**
+  - `README.md`: route policy, identity boundary, token protection, concurrency
+    limit + scheduler exemption, all env-var names, two-project Vercel setup
+    with a server-only backend URL, migration + verification instructions, and
+    the legacy status of `GITHUB_TOKEN` / `GITHUB_OWNER` / `GITHUB_REPO`.
+  - `backend/src/OPERATIONS.md`: per-user isolation, concurrency, encrypted
+    tokens, `python -m src.migrate`.
+  - GitHub OAuth App: Homepage `https://<console-domain>`, Authorization
+    callback `https://<console-domain>/auth/github/callback` (documented, not
+    configured here).
+- **No deployment is performed. No cloud resource is created. No credential is
+  invented or written.**
 
 ## Implementation order
 
-1. **Baseline.** Run all four gates on the intake revision and record current
-   pass/fail and the exact journal of GitHub calls the existing e2e path makes.
-2. **Extract `tests/fakes.py`.** Move the `tests/e2e_app.py` doubles into it,
-   add `CANARY_TOKEN`, the `Journal`, repository-aware `FakeRepositoryGitHub`
-   (incl. `release_for_tag`), and `seed_pack`. Re-point `tests/e2e_app.py` at it;
-   keep the e2e Playwright suite green.
-3. **Add fixture observability.** `GET /test/github/journal`,
-   `POST /test/github/journal/reset`, `POST /test/seed`, and the real-scheduler
-   due-slot control in `tests/e2e_app.py`. Guard the DB reset behind an env flag.
-4. **Backend `tests/test_oauth_flow.py`.** C1 + backend C2 (canary absent from all
-   API responses and `github_connection()`, present only in credentials; repr /
-   error redaction). Keep existing invalid-state regressions.
-5. **Backend `tests/test_repository_targeting.py`.** C3 (new `Store` on same
-   file), C4 (manual A→B, A work unchanged), C5 (`Scheduler.tick` on a due slot
-   targets B), C6 (seeded A packs — every action journals repo A only).
-6. **Playwright log capture.** `support/run-logged.mjs` + `playwright.config.ts`
-   wiring; confirm existing specs still pass with piped/teed output.
-7. **`frontend/e2e/oauth.spec.ts`.** C1 + C2 with full request/response/console/
-   storage/HTML capture and captured server-log assertions; HttpOnly cookie check.
-8. **`support/backend.ts` + `frontend/e2e/repository-targeting.spec.ts`.** C3
-   real-process restart, C4/C5/C6 browser-level with journal + `/test/publications`
-   + persisted/API assertions.
-9. **Trim `dashboard.spec.ts`** overlap; verify total e2e coverage unchanged.
-10. **Docs.** `README.md`, `src/OPERATIONS.md`, `.gitignore`.
-11. **Gates in order.** `.venv/bin/python -m pytest -q`,
-    `npm --prefix frontend test`, `npm --prefix frontend run test:e2e`
-    (provisioned browser binaries; no skips/timeouts/zero-test),
-    `npm --prefix frontend run build`. All four exit 0.
+1. **Baseline.** Run all four gates on the intake revision; record current
+   pass/fail so regressions are attributable.
+2. **Migration 4 + `store.py` scoping.** Add `users`/`sessions`, `user_id`
+   columns, indexes, legacy backfill; make every `Store` method user-scoped.
+   Land `tests/test_migrations_multiuser.py`.
+3. **`src/crypto.py` + token encryption.** Encrypt on write, decrypt in
+   `github_credentials()`. Land `tests/test_token_encryption.py`.
+4. **Identity plumbing.** `src/identity.py`, OAuth callback session→user bind,
+   `current_user` on protected routes, 401/403 exception handlers, `GET /`
+   scoping. Land `tests/test_identity_isolation.py` (API half).
+5. **Same-origin guard.** `require_same_origin` on mutating routes + Next route
+   handlers forwarding `origin`/`cookie`. Land `tests/test_same_origin.py`.
+6. **Scan concurrency.** `MAX_CONCURRENT_SCANS` setting, per-user lease/counter,
+   429 path, scheduled exemption; per-user `OperationRunner` + `Scheduler`.
+   Land `tests/test_scan_concurrency.py`.
+7. **Pack idempotency.** Upsert-by-(user, repo, version) in `draft`/`save_pack`;
+   partial unique index. Land `tests/test_pack_idempotency.py`.
+8. **`GET /api/scans` + operation labels.** Backend route + `lib/labels.ts` +
+   Operations/overview rendering. Land `tests/test_operations_view.py` and
+   `frontend/lib/labels.test.ts`.
+9. **Dashboard resilience.** `lib/api.ts` timeout + typed errors, `guard.ts`,
+   `Skeleton`, `RetryableError`, per-route `loading`/`error`, `globals.css`
+   skeleton + 24px targets, `middleware.ts`, `next.config.mjs` redirects. Land
+   `frontend/lib/api.test.ts`.
+10. **Multi-user fakes + e2e app.** Second identity, `/test/backend/mode`,
+    user-aware seed/tick.
+11. **Playwright specs.** `dashboard-resilience`, `identity-isolation`,
+    `route-matrix`, `mobile-targets`; adapt `dashboard`, `oauth`,
+    `repository-targeting`, `cron` specs to the authenticated model.
+12. **Docs.** `README.md`, `backend/src/OPERATIONS.md`, `.env.example` files.
+    Land `tests/test_docs_policy.py`.
+13. **Gates in order.** `.venv/bin/python -m pytest -q`,
+    `npm --prefix frontend test`, `npm --prefix frontend run test:e2e`,
+    `npm --prefix frontend run build` — all exit 0, no skips, no deployment.
 
 ## Acceptance criteria being designed to (from `criteria.json`, unedited)
 
-- **C1** — OAuth authorizes through deterministic doubles and permits repository
-  selection with no live GitHub: `tests/test_oauth_flow.py`,
-  `frontend/e2e/oauth.spec.ts`; journal shows authorize/token + repo-list, no
-  live request.
-- **C2** — access token not exposed to browser or logs: `frontend/e2e/oauth.spec.ts`
-  (URL bar, request URLs, response bodies, rendered HTML, `localStorage` +
-  `sessionStorage`, console, captured backend+frontend logs) + backend redaction
-  checks in `tests/test_oauth_flow.py`. Distinctive `CANARY_TOKEN`.
-- **C3** — selection survives a real backend restart on the same operator SQLite
-  file: `frontend/e2e/repository-targeting.spec.ts` (kill + respawn `uvicorn` on
-  the same DB path) + `tests/test_repository_targeting.py` (fresh `Store` / app).
-- **C4** — A→B change retargets the next manual scan; existing A work stays A:
-  `tests/test_repository_targeting.py` + `frontend/e2e/repository-targeting.spec.ts`,
-  asserting via the journal and persisted/API-visible results.
-- **C5** — next due scheduled scan targets B exactly as the manual scan: same two
-  files, driving the real `Scheduler` path with a controlled clock / due-slot
-  control.
-- **C6** — changing selection to B never retargets reconcile, rollback, approval,
-  or publish for existing A work: `tests/test_repository_targeting.py` +
-  `frontend/e2e/repository-targeting.spec.ts`, asserting every GitHub interaction
-  names repo A via the journal and `/test/publications`, and records stay
-  A-targeted.
-- **C7** — all existing backend, frontend unit, Playwright, and production
-  Next.js build checks stay green: enforced by running all four gates in order at
-  step 11, and by keeping `src/*` unchanged unless a criterion forces it.
+- **C1** — `tests` in `frontend/lib/api.test.ts` +
+  `frontend/e2e/dashboard-resilience.spec.ts`: ≥10× fresh/reload/direct-nav
+  renders for `/`, `/releases`, `/operations`; delayed then failed backend →
+  accessible non-jumping skeleton → bounded error within 10s; `Retry` restores
+  without a browser restart.
+- **C2** — `tests/test_scan_concurrency.py`, `tests/test_same_origin.py`,
+  `tests/test_identity_isolation.py`: 401 without a session (no GitHub call),
+  generic 403 cross-user (no mutation/GitHub call), success + exactly one
+  GitHub call for the owner, 429 at the configured limit (no GitHub call),
+  configurable up to 10, independent per-user allowance, scheduled scans
+  `CRON_SECRET`-only and concurrency-exempt, matrix covers repo selection /
+  schedule / approve / reject / publish / reconcile / backend aliases.
+- **C3** — `tests/test_identity_isolation.py`,
+  `tests/test_token_encryption.py`, `frontend/e2e/identity-isolation.spec.ts`:
+  two disjoint accounts; selectors, `GET /api/scans`, and every dashboard/API
+  view are own-only; cross-user read/scan/approve/reject/publish denied with no
+  change; no team/org/role path; canary absent from browser responses, logs,
+  and DB plaintext.
+- **C4** — `frontend/e2e/route-matrix.spec.ts`: direct load + refresh of all
+  sidebar routes, `/releases/{id}`, `/github`, `/schedule` → no 404; aliases
+  resolve/redirect with a usable refresh/bookmark URL; every sidebar link lands
+  correctly.
+- **C5** — `tests/test_pack_idempotency.py`: identical repeated scan → one
+  current pack, no duplicate in `/api/releases`, both scans + audit still
+  queryable; a different user/repo at the same version → a distinct pack that
+  does not affect the first.
+- **C6** — `tests/test_operations_view.py`,
+  `frontend/lib/labels.test.ts`, `frontend/e2e/mobile-targets.spec.ts`:
+  human-readable operation labels (`Non Release manual` gone) + a timestamp on
+  every operation; `GET /api/scans` 401 unauthenticated / own-only
+  authenticated; ≥24×24px interactive targets at a mobile viewport; skeleton
+  and error/retry states carry meaningful accessible text.
+- **C7** — `tests/test_docs_policy.py` + manual doc review: README /
+  `OPERATIONS.md` describe public vs protected routes, one-account-per-user
+  ownership, token protection, concurrency limits, scheduler auth + exemption,
+  separate `backend`/`frontend` Vercel roots, server-only
+  `RELEASE_MANAGER_API_URL`, all env-var names, migration steps, verification
+  commands, and the legacy status of `GITHUB_TOKEN`/`GITHUB_OWNER`/
+  `GITHUB_REPO`; no real secret or token value anywhere in docs or tracked
+  examples.
+- **C8** — the four gates run in order at step 13 and exit 0 using loopback
+  services and deterministic fakes; no deployment command runs and no cloud
+  resource or deployment artifact is created.
+
+## Explicitly not changed
+
+- `criteria.json` (acceptance phase only edits `passes`).
+- The two Vercel project roots, `backend/vercel.json`, `frontend/vercel.json`
+  rewrites/crons, and the server-only `RELEASE_MANAGER_API_URL` contract.
+- Any existing route path, screen name, or workflow state.
+- `OAuthService` session-cookie signing and the OAuth state machine.
+- The GitHub REST client's request shapes and token redaction.
