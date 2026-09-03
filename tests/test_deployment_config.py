@@ -29,6 +29,10 @@ def test_vercel_json_references_the_next_app_and_python_function():
     assert config["buildCommand"] == "npm run build --workspace frontend"
     assert "api/index.py" in text
     assert config["functions"]["api/index.py"]["includeFiles"] == "src/**"
+    assert config["rewrites"] == [
+        {"source": "/health", "destination": "/api/index.py"},
+        {"source": "/_api/:path*", "destination": "/api/index.py"},
+    ]
     assert "crons" in config and config["crons"]
     assert any("/api/cron/scheduler" in c.get("path", "") for c in config["crons"])
     assert config["crons"] == [
