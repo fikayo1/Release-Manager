@@ -2,100 +2,98 @@
   "criteria": [
     {
       "id": "C1",
-      "description": "Dashboard routes always settle into content or a bounded recoverable error instead of an indefinite loading spinner.",
+      "description": "`/` is a public marketing landing page with product story, a clear primary CTA, and a Login with GitHub action; it renders with no session and exposes no dashboard data or actions",
       "verification": [
-        "Using seeded authenticated data, directly load, reload, and freshly navigate to `/`, `/releases`, and `/operations` at least 10 times each; every attempt renders the expected data.",
-        "Repeat with the backend deterministically delayed and then unavailable; an accessible skeleton appears without material layout movement and changes to an error state within 10 seconds.",
-        "Restore the backend and activate Retry; the route renders data without a full browser restart.",
-        "Run the deterministic frontend regression tests covering normal, delayed, and failed responses; they pass."
+        "Open `/` in a fresh browser with no session cookie",
+        "Expect HTTP 200 and page renders without redirect",
+        "Page shows product/story copy, one prominent primary CTA, and a visible \u201cLogin with GitHub\u201d control",
+        "No release, operation, or repository data from any account is shown",
+        "Clicking \u201cLogin with GitHub\u201d leads to the GitHub OAuth flow (`/auth/github` or `/login`)"
       ],
       "passes": false,
       "priority": 1
     },
     {
       "id": "C2",
-      "description": "All scan triggers and other state-changing routes enforce authentication, ownership, request-origin protection, and scan concurrency limits.",
+      "description": "An authenticated user visiting `/` still sees the marketing page (no redirect) with the primary CTA changed to \u201cGo to dashboard\u201d linking to `/dashboard`",
       "verification": [
-        "Call `POST /api/scans` and the equivalent backend scan route without a session; each returns 401 and the GitHub fake records no call.",
-        "With user B's session, request a scan or release action against user A's repository or record ID; each returns a generic 403 and creates no operation, audit mutation, or GitHub call.",
-        "With user A's valid session and origin, start a scan of A's selected repository; it succeeds and invokes the GitHub fake once.",
-        "Under the current Vercel limit of one concurrent user scan, attempt another while the first remains active; it returns 429 and does not invoke GitHub. Verify the configurable limit accepts values up to 10 and another user has an independent allowance.",
-        "Trigger a trusted scheduled scan while a user scan is active; it remains exempt from the user concurrency limit and still requires valid `CRON_SECRET` authentication.",
-        "Verify the protected-route matrix also covers repository selection, schedule changes, approval, rejection, publication, and any direct backend aliases."
+        "Complete GitHub OAuth using the deterministic fake so a session exists",
+        "Navigate to `/`",
+        "Expect HTTP 200, the marketing page renders, no redirect occurs",
+        "The primary CTA reads \u201cGo to dashboard\u201d and navigates to `/dashboard` when clicked"
       ],
       "passes": false,
-      "priority": 1
+      "priority": 2
     },
     {
       "id": "C3",
-      "description": "Two independently authenticated GitHub accounts have isolated connections, repositories, workflow records, actions, and protected tokens.",
+      "description": "Unauthenticated access to any `/dashboard` route redirects to `/login` and renders no dashboard data or actions",
       "verification": [
-        "Sign in as two fake GitHub accounts with disjoint repository grants and select a repository for each.",
-        "For each user, repository selectors and `GET /api/scans` expose only that user's authorized repositories and scans.",
-        "Create scans, packs, operations, decisions, schedules, and audit events for both users; each dashboard and API session displays only its own records.",
-        "Attempt cross-user read, scan, approve, reject, and publish operations; all are denied and neither user's records nor GitHub calls are changed.",
-        "Confirm there are no shared team, organization, or application-role access paths.",
-        "Confirm the fake OAuth token canary appears in neither browser responses nor logs nor plaintext in the test database."
+        "With no session, request `/dashboard`, `/dashboard/releases`, `/dashboard/operations`, `/dashboard/settings/github`, `/dashboard/settings/schedule`",
+        "Each ends on `/login` (redirect)",
+        "No dashboard data or action controls are rendered on the way",
+        "A protected API route (e.g. releases list) still returns 401 without a session"
       ],
       "passes": false,
       "priority": 1
     },
     {
       "id": "C4",
-      "description": "Every navigation destination and compatibility URL is directly loadable and refresh-safe.",
+      "description": "`/login` is a dedicated sign-in page whose GitHub button starts OAuth, and completing OAuth lands the user on `/dashboard`",
       "verification": [
-        "In an authenticated browser, directly load and refresh `/`, `/releases`, `/operations`, `/settings/github`, `/settings/schedule`, and a valid `/releases/{id}`; none returns 404.",
-        "Directly load `/github` and `/schedule`; each resolves or redirects to the corresponding settings page while preserving a usable refresh or bookmark URL.",
-        "Activate every sidebar link and confirm its destination renders the intended page."
+        "Open `/login` with no session; expect 200 and an editorial sign-in layout with a GitHub button",
+        "Click the button and complete OAuth with the deterministic fake",
+        "Final location is `/dashboard` (not `/settings/github` or `/`)",
+        "The dashboard renders as an authenticated view"
       ],
       "passes": false,
       "priority": 1
     },
     {
       "id": "C5",
-      "description": "Release-pack creation is idempotent per user, repository, and version while scan and audit history remains intact.",
+      "description": "The authenticated dashboard uses a responsive left sidebar (not top navigation) with section links plus sign-out, and the logo links to `/`",
       "verification": [
-        "Run the same deterministic scan twice for one user, repository, and version.",
-        "Confirm only one current release pack exists for that identity and the release list does not show a duplicate.",
-        "Confirm both scan attempts and their audit history remain queryable.",
-        "Repeat with another user or repository using the same version; a distinct current pack is created without affecting the first."
+        "Authenticate and open `/dashboard` at a desktop viewport (\u22651200px)",
+        "A left sidebar is present with links to Overview, Releases, Operations, GitHub, Schedule, and a sign-out control; there is no top navigation bar",
+        "Each link navigates to the matching `/dashboard/...` route and marks itself active",
+        "Clicking the Release Manager logo/wordmark navigates to `/`",
+        "Resize to a narrow viewport (\u2264600px): the sidebar collapses to a toggle control that opens and closes it"
+      ],
+      "passes": false,
+      "priority": 1
+    },
+    {
+      "id": "C6",
+      "description": "A gold accent is visibly present in the authenticated app and the design context is documented in `.impeccable.md`",
+      "verification": [
+        "Inspect `/dashboard`: a gold accent color is applied to primary actions and/or the active nav item",
+        "`.impeccable.md` exists at the release-manager repo root and documents audience, typography pairing, neumorphic tokens, the gold accent token, and accessibility rules",
+        "Primary text/background combinations meet WCAG AA contrast (spot-check headings and body with a contrast checker)"
       ],
       "passes": false,
       "priority": 2
     },
     {
-      "id": "C6",
-      "description": "Operation and scan interfaces expose polished, accessible production information.",
-      "verification": [
-        "Open Operations and confirm raw labels such as `Non Release manual` are replaced by human-readable wording and every operation displays a timestamp.",
-        "Call `GET /api/scans` without a session and receive 401; call it with a session and receive a list containing only that user's scans.",
-        "At a mobile viewport, measure sidebar, retry, scan, decision, and settings controls; every interactive target is at least 24 by 24 CSS pixels.",
-        "Keyboard and accessibility inspection identifies the loading skeleton and error/retry state with meaningful accessible text."
-      ],
-      "passes": false,
-      "priority": 3
-    },
-    {
       "id": "C7",
-      "description": "Operator documentation accurately describes authentication, isolation, public routes, environment names, and separate Vercel projects without exposing values.",
+      "description": "Existing release workflow behavior is preserved through the redesigned UI",
       "verification": [
-        "README/operator docs identify health and OAuth entry/callback as public, protected UI and API behavior, one-account-per-user ownership, token protection, scan concurrency limits, and trusted scheduler authentication and exemption.",
-        "Docs retain separate `backend` FastAPI and `frontend` Next.js Vercel roots and state that `RELEASE_MANAGER_API_URL` is server-only.",
-        "Docs list all required environment-variable names, migration steps, and verification commands, and explain whether `GITHUB_TOKEN`, `GITHUB_OWNER`, and `GITHUB_REPO` are legacy or local compatibility variables.",
-        "Search the documentation and tracked examples; no real secret or OAuth token value is present."
+        "Authenticate and connect a repository via `/dashboard/settings/github` using the deterministic GitHub fake",
+        "On `/dashboard`, trigger \u201cScan now\u201d",
+        "A draft release appears under `/dashboard/releases`; open it at `/dashboard/releases/{id}`",
+        "Attempt approval without an actor/reason and confirm it is rejected; provide actor + reason and confirm publication is attempted",
+        "Navigation and refresh alone start no scan"
       ],
       "passes": false,
-      "priority": 3
+      "priority": 1
     },
     {
       "id": "C8",
-      "description": "The complete offline verification chain passes without deployment or cloud-resource creation.",
+      "description": "The full deterministic verification suite passes",
       "verification": [
-        "Run `.venv/bin/python -m pytest -q`; it exits successfully.",
-        "Run `npm --prefix frontend test`; it exits successfully.",
-        "Run `npm --prefix frontend run test:e2e`; it exits successfully using loopback services and deterministic fakes.",
-        "Run `npm --prefix frontend run build`; the production Next.js build exits successfully.",
-        "Confirm no deployment command ran and no cloud resource or deployment artifact was created."
+        "Run `.venv/bin/python -m pytest -q` \u2014 all pass",
+        "Run `npm --prefix frontend test` \u2014 all pass",
+        "Run `npm --prefix frontend run test:e2e` \u2014 all pass, including tests for the auth gate, post-login landing on `/dashboard`, sidebar, and logo-to-`/` link",
+        "Run `npm --prefix frontend run build` \u2014 succeeds"
       ],
       "passes": false,
       "priority": 1
