@@ -62,6 +62,12 @@ class Store:
             row = db.execute("SELECT user_id FROM user_sessions WHERE session_id=?", (session_id,)).fetchone()
             return row["user_id"] if row else None
 
+    def singleton_user(self):
+        """Return an identity only when the database contains exactly one user."""
+        with self.connect() as db:
+            rows = db.execute("SELECT id FROM users LIMIT 2").fetchall()
+        return rows[0]["id"] if len(rows) == 1 else None
+
     def save_user_github_connection(self, user_id, login, account_id, access_token, refresh_token, expires_at, now):
         with self.connect() as db:
             previous = db.execute("SELECT selected_repository FROM user_github_connections WHERE user_id=?", (user_id,)).fetchone()
@@ -215,6 +221,28 @@ class Store:
                 (pack.id, pack.scan_id, pack.status.value, json.dumps(primitive(pack)), now),
             )
             self.event(db, "pack", pack.id, now, {"version": pack.version})
+
+    def save_current_pack(self, pack, now, user_id, repository):
+        """Create or refresh the user's canonical repository/version pack."""
+        from dataclasses import replace
+        with self.connect() as db:
+            row = db.execute("SELECT pack_id FROM pack_keys WHERE user_id=? AND repository=? AND version=?",
+                             (user_id, repository, pack.version)).fetchone()
+            if row:
+                canonical = replace(pack, id=row["pack_id"])
+                db.execute("UPDATE packs SET scan_id=?,data=?,created_at=? WHERE id=?",
+                           (pack.scan_id, json.dumps(primitive(canonical)), now, canonical.id))
+                self.event(db, "pack_reused", canonical.id, now,
+                           {"version": canonical.version, "scan_id": pack.scan_id})
+                return canonical
+            db.execute("INSERT INTO packs VALUES(?,?,?,?,?)",
+                       (pack.id, pack.scan_id, pack.status.value, json.dumps(primitive(pack)), now))
+            db.execute("INSERT INTO pack_keys(user_id,repository,version,pack_id) VALUES(?,?,?,?)",
+                       (user_id, repository, pack.version, pack.id))
+            db.execute("INSERT INTO resource_owners(kind,resource_id,user_id) VALUES('pack',?,?)",
+                       (pack.id, user_id))
+            self.event(db, "pack", pack.id, now, {"version": pack.version})
+            return pack
 
     def pack(self, pid):
         with self.connect() as db:
@@ -462,6 +490,40 @@ class Store:
                     pack = db.execute("SELECT status FROM packs WHERE id=?", (operation["pack_id"],)).fetchone()
                     operation["pack_status"] = pack["status"] if pack else None
             return operations
+
+    def user_schedule(self, user_id):
+        from .cron import next_run
+        from datetime import datetime, timezone
+        with self.connect() as db:
+            row = db.execute("SELECT * FROM user_schedules WHERE user_id=?", (user_id,)).fetchone()
+        data = dict(row) if row else {"user_id": user_id, "expression": "0 * * * *", "enabled": 0,
+                                     "updated_at": "1970-01-01T00:00:00+00:00"}
+        data["enabled"] = bool(data["enabled"]); data["timezone"] = "UTC"
+        data["health"] = {"heartbeat_at": None, "last_run_at": None, "last_result": None, "last_error": None}
+        data["next_run"] = next_run(data["expression"], datetime.now(timezone.utc)).isoformat() if data["enabled"] else None
+        return data
+
+    def update_user_schedule(self, user_id, expression, enabled, now):
+        from .cron import parse
+        parse(expression)
+        with self.connect() as db:
+            db.execute("""INSERT INTO user_schedules(user_id,expression,enabled,updated_at) VALUES(?,?,?,?)
+                ON CONFLICT(user_id) DO UPDATE SET expression=excluded.expression,enabled=excluded.enabled,updated_at=excluded.updated_at""",
+                       (user_id, expression.strip(), int(enabled), now))
+            self.event(db, "schedule", user_id, now, {"expression": expression.strip(), "enabled": bool(enabled)})
+            # Keep the legacy scheduler projection in sync until the scheduler
+            # itself iterates user_schedules directly.
+            db.execute("UPDATE schedules SET expression=?,enabled=?,updated_at=? WHERE id=1",
+                       (expression.strip(), int(enabled), now))
+        return self.user_schedule(user_id)
+
+    def scoped_audit(self, user_id):
+        owned = {(kind, r["resource_id"]) for kind in ("pack", "scan", "operation")
+                 for r in self._owned_rows(kind, user_id)}
+        return [record for record in self.audit()
+                if (record["kind"].split("_")[0], record["subject_id"]) in owned
+                or ("pack", record["subject_id"]) in owned
+                or record["subject_id"] == user_id]
 
     def schedule(self):
         from .cron import next_run

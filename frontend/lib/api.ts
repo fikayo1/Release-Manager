@@ -10,7 +10,11 @@ export {
   UnauthorizedError,
 } from './http';
 
-const base = process.env.RELEASE_MANAGER_API_URL || 'http://127.0.0.1:8000';
+function apiBase(): string {
+  const value = process.env.RELEASE_MANAGER_API_URL;
+  if (!value) throw new Error('RELEASE_MANAGER_API_URL is required');
+  return value.replace(/\/$/, '');
+}
 
 // The browser session cookie and a same-origin marker are forwarded to
 // FastAPI so it can bind the request to a user and enforce same-origin on
@@ -26,8 +30,19 @@ async function forwardedHeaders(): Promise<Record<string, string>> {
     /* outside a request scope */
   }
   try {
-    const origin = (await headers()).get('origin');
-    if (origin) forwarded.origin = origin;
+    const incoming = await headers();
+    // Route handlers preserve the raw Cookie header even when Next's async
+    // CookieStore is empty during an internal server fetch.
+    if (!forwarded.cookie) {
+      const rawCookie = incoming.get('cookie');
+      if (rawCookie) forwarded.cookie = rawCookie;
+    }
+    const origin = incoming.get('origin');
+    // Server components and same-origin route handlers frequently have no
+    // browser Origin. Supply the configured public console origin rather than
+    // weakening backend CSRF enforcement.
+    forwarded.origin = origin || process.env.RELEASE_MANAGER_WEB_URL || '';
+    if (!forwarded.origin) delete forwarded.origin;
   } catch {
     /* outside a request scope */
   }
@@ -37,7 +52,7 @@ async function forwardedHeaders(): Promise<Record<string, string>> {
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const forwarded = await forwardedHeaders();
   return fetchJson<T>(
-    base + path,
+    apiBase() + path,
     {
       ...init,
       cache: 'no-store',

@@ -16,7 +16,7 @@ class OperationRunner:
         self.store,self.github,self.owner,self.lease_seconds,self.clock=store,github,owner or str(uuid4()),lease_seconds,clock
         self.client_provider=client_provider
 
-    def run(self, source="manual", scheduled_for=None):
+    def run(self, source="manual", scheduled_for=None, user_id=None):
         operation_id=str(uuid4()); moment=self.clock(); now=iso(moment)
         if self.client_provider:
             connection=self.store.github_connection()
@@ -62,7 +62,7 @@ class OperationRunner:
         renewal.start()
         try:
             snapshot,verdict=scan(self.store,github,now)
-            pack=draft(self.store,snapshot,verdict,now)
+            pack=draft(self.store,snapshot,verdict,now,user_id=user_id)
             result="draft_created" if pack else "non_release"
             self.store.finish_operation(operation_id,result,iso(self.clock()),snapshot.id,pack.id if pack else None)
         except Exception:

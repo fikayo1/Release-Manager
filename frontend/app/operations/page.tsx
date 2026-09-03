@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic';
 import {api} from '@/lib/api';
 import {utc} from '@/lib/format';
 import {operationTitle, statusLabel} from '@/lib/labels';
