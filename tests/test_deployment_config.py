@@ -1,14 +1,15 @@
-"""C2: repository-only Vercel artifacts exist and no second platform is added."""
+"""C2: frontend and FastAPI use separate Vercel projects, not rewrites."""
 import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
-REQUIRED_ENV = [
-    "DATABASE_URL", "POSTGRES_URL", "RELEASE_MANAGER_WEB_URL", "RELEASE_MANAGER_API_URL",
+BACKEND_ENV = [
+    "DATABASE_URL", "POSTGRES_URL", "RELEASE_MANAGER_WEB_URL",
     "GITHUB_OAUTH_CLIENT_ID", "GITHUB_OAUTH_CLIENT_SECRET", "GITHUB_OAUTH_CALLBACK_URL",
     "SESSION_SECRET", "CRON_SECRET",
 ]
+FRONTEND_ENV = ["RELEASE_MANAGER_API_URL", "CRON_SECRET"]
 
 FORBIDDEN = [
     "Dockerfile", "docker-compose.yml", "docker-compose.yaml", "railway.json",
@@ -16,44 +17,36 @@ FORBIDDEN = [
 ]
 
 
-def test_vercel_json_references_the_next_app_and_python_function():
-    config = json.loads((ROOT / "vercel.json").read_text())
-    package = json.loads((ROOT / "package.json").read_text())
-    text = json.dumps(config)
-    assert package["workspaces"] == ["frontend"]
-    assert package["dependencies"]["next"] == "15.5.10"
-    assert package["dependencies"]["react"] == "19.1.1"
-    assert package["dependencies"]["react-dom"] == "19.1.1"
-    assert (ROOT / "package-lock.json").is_file()
-    assert config["installCommand"] == "npm ci"
-    assert config["buildCommand"] == "npm run build --workspace frontend"
-    assert "api/index.py" in text
-    assert config["functions"]["api/index.py"]["includeFiles"] == "src/**"
-    assert config["rewrites"] == [
-        {"source": "/health", "destination": "/api/index.py"},
-        {"source": "/_api/:path*", "destination": "/api/index.py"},
-    ]
-    assert "crons" in config and config["crons"]
-    assert any("/api/cron/scheduler" in c.get("path", "") for c in config["crons"])
+def test_frontend_vercel_project_has_only_next_and_cron_configuration():
+    config = json.loads((ROOT / "frontend" / "vercel.json").read_text())
+    assert "rewrites" not in config
+    assert "api/index.py" not in json.dumps(config)
+    assert config["functions"]["app/api/cron/scheduler/route.ts"]["maxDuration"] == 60
     assert config["crons"] == [
         {"path": "/api/cron/scheduler", "schedule": "0 9 * * *"}
     ]
 
 
-def test_python_entrypoint_imports_the_app_and_disables_the_scheduler():
-    source = (ROOT / "api" / "index.py").read_text()
+def test_backend_has_a_native_fastapi_entrypoint_and_dependencies():
+    source = (ROOT / "backend" / "main.py").read_text()
     assert "from src.app import create_app" in source
     assert "enable_scheduler=False" in source
+    assert "fastapi" in (ROOT / "backend" / "requirements.txt").read_text().lower()
+    config = json.loads((ROOT / "backend" / "vercel.json").read_text())
+    assert config["functions"]["main.py"]["maxDuration"] == 60
 
 
-def test_env_example_lists_names_with_placeholder_values_only():
-    lines = (ROOT / ".env.example").read_text().splitlines()
+def test_env_examples_split_frontend_and_backend_configuration():
+    lines = (ROOT / "backend" / ".env.example").read_text().splitlines()
     assignments = {line.split("=", 1)[0].strip(): line.split("=", 1)[1].strip()
                    for line in lines if "=" in line and not line.strip().startswith("#")}
-    for name in REQUIRED_ENV:
-        assert name in assignments, f"{name} missing from .env.example"
+    for name in BACKEND_ENV:
+        assert name in assignments, f"{name} missing from backend/.env.example"
+    frontend = (ROOT / "frontend" / ".env.example").read_text()
+    for name in FRONTEND_ENV:
+        assert f"{name}=" in frontend
     # Placeholders only: no real-looking GitHub token or long secret material.
-    blob = (ROOT / ".env.example").read_text()
+    blob = (ROOT / "backend" / ".env.example").read_text() + frontend
     assert "ghp_" not in blob
     assert "ghs_" not in blob
 

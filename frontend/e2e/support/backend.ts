@@ -24,7 +24,7 @@ export class BackendProcess {
     ], {
       stdio: 'inherit',
       env: {
-        ...process.env, E2E_DB: this.dbPath, E2E_KEEP_DB: '1',
+        ...process.env, PYTHONPATH: '../backend', E2E_DB: this.dbPath, E2E_KEEP_DB: '1',
         E2E_API_PORT: String(this.port), E2E_WEB_URL: this.origin,
       },
     });

@@ -26,7 +26,7 @@ export default defineConfig({
   webServer: [
     {
       command: logged(BACKEND_LOG,
-        '../.venv/bin/uvicorn tests.e2e_app:app --app-dir .. --host 127.0.0.1 --port 18000'),
+        'env PYTHONPATH=../backend ../.venv/bin/uvicorn tests.e2e_app:app --app-dir .. --host 127.0.0.1 --port 18000'),
       url: `${apiURL}/health`,
       reuseExistingServer: false,
       env: secretCanaries,
