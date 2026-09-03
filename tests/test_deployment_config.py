@@ -28,12 +28,13 @@ def test_frontend_vercel_project_has_only_next_and_cron_configuration():
 
 
 def test_backend_has_a_native_fastapi_entrypoint_and_dependencies():
-    source = (ROOT / "backend" / "main.py").read_text()
+    source = (ROOT / "backend" / "api" / "index.py").read_text()
     assert "from src.app import create_app" in source
     assert "enable_scheduler=False" in source
     assert "fastapi" in (ROOT / "backend" / "requirements.txt").read_text().lower()
     config = json.loads((ROOT / "backend" / "vercel.json").read_text())
-    assert config["functions"]["main.py"]["maxDuration"] == 60
+    assert config["functions"]["api/index.py"]["maxDuration"] == 60
+    assert config["rewrites"] == [{"source": "/(.*)", "destination": "/api/index.py"}]
 
 
 def test_env_examples_split_frontend_and_backend_configuration():
