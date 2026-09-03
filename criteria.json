@@ -2,98 +2,66 @@
   "criteria": [
     {
       "id": "C1",
-      "description": "`/` is a public marketing landing page with product story, a clear primary CTA, and a Login with GitHub action; it renders with no session and exposes no dashboard data or actions",
+      "description": "The public home page presents a complete Release Manager landing-page narrative rather than only a short hero.",
       "verification": [
-        "Open `/` in a fresh browser with no session cookie",
-        "Expect HTTP 200 and page renders without redirect",
-        "Page shows product/story copy, one prominent primary CTA, and a visible \u201cLogin with GitHub\u201d control",
-        "No release, operation, or repository data from any account is shown",
-        "Clicking \u201cLogin with GitHub\u201d leads to the GitHub OAuth flow (`/auth/github` or `/login`)"
+        "Open `/` without an authenticated session.",
+        "Confirm the page includes a header, hero, product explanation, five-phase workflow, benefits or outcomes, Shipyard introduction, final call-to-action area, and footer.",
+        "Confirm the workflow visibly names scan, draft, review, publish, and rollback."
       ],
       "passes": false,
       "priority": 1
     },
     {
       "id": "C2",
-      "description": "An authenticated user visiting `/` still sees the marketing page (no redirect) with the primary CTA changed to \u201cGo to dashboard\u201d linking to `/dashboard`",
+      "description": "The landing page provides two clear calls to action with working destinations.",
       "verification": [
-        "Complete GitHub OAuth using the deterministic fake so a session exists",
-        "Navigate to `/`",
-        "Expect HTTP 200, the marketing page renders, no redirect occurs",
-        "The primary CTA reads \u201cGo to dashboard\u201d and navigates to `/dashboard` when clicked"
+        "Open `/` and locate the two prominent hero calls to action.",
+        "Activate the product-access CTA and confirm it reaches `/login`.",
+        "Return to `/`, activate the informational CTA, and confirm it reaches `/about`."
       ],
       "passes": false,
-      "priority": 2
+      "priority": 1
     },
     {
       "id": "C3",
-      "description": "Unauthenticated access to any `/dashboard` route redirects to `/login` and renders no dashboard data or actions",
+      "description": "The separate About page explains the relationship between Release Manager, Shipyard, and Herald.",
       "verification": [
-        "With no session, request `/dashboard`, `/dashboard/releases`, `/dashboard/operations`, `/dashboard/settings/github`, `/dashboard/settings/schedule`",
-        "Each ends on `/login` (redirect)",
-        "No dashboard data or action controls are rendered on the way",
-        "A protected API route (e.g. releases list) still returns 401 without a session"
+        "Open `/about` directly while signed out and confirm it renders successfully.",
+        "Confirm it explicitly says Release Manager is built by Shipyard.",
+        "Confirm it identifies Shipyard as a product-building platform by Herald and relates it to governed, reviewable delivery."
       ],
       "passes": false,
       "priority": 1
     },
     {
       "id": "C4",
-      "description": "`/login` is a dedicated sign-in page whose GitHub button starts OAuth, and completing OAuth lands the user on `/dashboard`",
+      "description": "The separate Contact page clearly communicates that contact functionality is not yet available.",
       "verification": [
-        "Open `/login` with no session; expect 200 and an editorial sign-in layout with a GitHub button",
-        "Click the button and complete OAuth with the deterministic fake",
-        "Final location is `/dashboard` (not `/settings/github` or `/`)",
-        "The dashboard renders as an authenticated view"
+        "Open `/contact` directly while signed out and confirm it renders successfully without an external redirect.",
+        "Confirm a clearly visible \u201cComing soon\u201d label or message is present.",
+        "Confirm there is no active contact form and that a visitor can navigate back to the home or About page."
       ],
       "passes": false,
       "priority": 1
     },
     {
       "id": "C5",
-      "description": "The authenticated dashboard uses a responsive left sidebar (not top navigation) with section links plus sign-out, and the logo links to `/`",
+      "description": "The public marketing pages are consistently navigable and usable across desktop, mobile, and keyboard interaction.",
       "verification": [
-        "Authenticate and open `/dashboard` at a desktop viewport (\u22651200px)",
-        "A left sidebar is present with links to Overview, Releases, Operations, GitHub, Schedule, and a sign-out control; there is no top navigation bar",
-        "Each link navigates to the matching `/dashboard/...` route and marks itself active",
-        "Clicking the Release Manager logo/wordmark navigates to `/`",
-        "Resize to a narrow viewport (\u2264600px): the sidebar collapses to a toggle control that opens and closes it"
-      ],
-      "passes": false,
-      "priority": 1
-    },
-    {
-      "id": "C6",
-      "description": "A gold accent is visibly present in the authenticated app and the design context is documented in `.impeccable.md`",
-      "verification": [
-        "Inspect `/dashboard`: a gold accent color is applied to primary actions and/or the active nav item",
-        "`.impeccable.md` exists at the release-manager repo root and documents audience, typography pairing, neumorphic tokens, the gold accent token, and accessibility rules",
-        "Primary text/background combinations meet WCAG AA contrast (spot-check headings and body with a contrast checker)"
+        "On `/`, `/about`, and `/contact`, confirm shared navigation provides working links to Home, About, Contact, and product access.",
+        "Check the pages at a mobile viewport and confirm content remains readable without horizontal scrolling or overlapping controls.",
+        "Navigate interactive controls using only the keyboard and confirm each receives a visible focus indicator."
       ],
       "passes": false,
       "priority": 2
     },
     {
-      "id": "C7",
-      "description": "Existing release workflow behavior is preserved through the redesigned UI",
+      "id": "C6",
+      "description": "The marketing expansion preserves the existing product entry points and passes the release-manager verification suite.",
       "verification": [
-        "Authenticate and connect a repository via `/dashboard/settings/github` using the deterministic GitHub fake",
-        "On `/dashboard`, trigger \u201cScan now\u201d",
-        "A draft release appears under `/dashboard/releases`; open it at `/dashboard/releases/{id}`",
-        "Attempt approval without an actor/reason and confirm it is rejected; provide actor + reason and confirm publication is attempted",
-        "Navigation and refresh alone start no scan"
-      ],
-      "passes": false,
-      "priority": 1
-    },
-    {
-      "id": "C8",
-      "description": "The full deterministic verification suite passes",
-      "verification": [
-        "Run `.venv/bin/python -m pytest -q` \u2014 all pass",
-        "Run `npm --prefix frontend test` \u2014 all pass",
-        "Run `npm --prefix frontend run test:e2e` \u2014 all pass, including tests for the auth gate, post-login landing on `/dashboard`, sidebar, and logo-to-`/` link",
-        "Run `npm --prefix frontend run build` \u2014 succeeds"
+        "Open `/login` signed out and confirm the existing GitHub sign-in experience is still available.",
+        "Confirm an unauthenticated visit to `/dashboard` continues to redirect to `/login`.",
+        "Run `.venv/bin/python -m pytest -q && (test ! -f frontend/package.json || (npm --prefix frontend test && npm --prefix frontend run test:e2e && npm --prefix frontend run build))` and confirm it exits successfully."
       ],
       "passes": false,
       "priority": 1
