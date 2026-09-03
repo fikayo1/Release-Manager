@@ -1,0 +1,5 @@
+[tool.vercel]
+# Supports the API Vercel project whether its Root Directory is `backend`
+# (the documented setup) or the repository root. This removes ambiguity when
+# Vercel discovers the frontend and test FastAPI candidates as well.
+entrypoint = "backend.api.index:app"
