@@ -11,6 +11,7 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from .config import Settings
 from .db import resolve_dialect
@@ -36,28 +37,40 @@ def create_app(settings: Settings | None = None, github=None, validate: bool = T
         if not validate and settings is None and not hasattr(app.state, "store"):
             yield
             return
-        cfg = settings or Settings.from_env()
-        if not hasattr(app.state, "store"):
-            app.state.store = _build_store(cfg)
-            app.state.settings = cfg
-            # An explicitly injected GitHub double is a unit-test convenience and
-            # bypasses OAuth credential resolution entirely.
-            app.state.github = github
-            if github is None:
-                oauth_factory = oauth_service_factory or OAuthService
-                app.state.oauth = oauth_factory(app.state.store, cfg.oauth_client_id, cfg.oauth_client_secret,
-                                                cfg.oauth_callback_url, cfg.session_secret, cfg.secure_cookie)
-                app.state.account_client_factory = account_client_factory or GitHubAccountClient
-                repository_factory = github_client_factory or GitHubClient
+        try:
+            cfg = settings or Settings.from_env()
+            if not hasattr(app.state, "store"):
+                app.state.store = _build_store(cfg)
+                app.state.settings = cfg
+                # An explicitly injected GitHub double is a unit-test convenience and
+                # bypasses OAuth credential resolution entirely.
+                app.state.github = github
+                if github is None:
+                    oauth_factory = oauth_service_factory or OAuthService
+                    app.state.oauth = oauth_factory(app.state.store, cfg.oauth_client_id, cfg.oauth_client_secret,
+                                                    cfg.oauth_callback_url, cfg.session_secret, cfg.secure_cookie)
+                    app.state.account_client_factory = account_client_factory or GitHubAccountClient
+                    repository_factory = github_client_factory or GitHubClient
 
-                def provider(slug):
-                    credentials = app.state.store.github_credentials()
-                    if not credentials or credentials["status"] != "connected":
-                        raise RuntimeError("GitHub connection requires reconnect")
-                    owner, repo = slug.split("/", 1)
-                    return repository_factory(owner, repo, credentials["access_token"])
+                    def provider(slug):
+                        credentials = app.state.store.github_credentials()
+                        if not credentials or credentials["status"] != "connected":
+                            raise RuntimeError("GitHub connection requires reconnect")
+                        owner, repo = slug.split("/", 1)
+                        return repository_factory(owner, repo, credentials["access_token"])
 
-                app.state.github_provider = provider
+                    app.state.github_provider = provider
+        except ValueError as exc:
+            # Configuration names and callback-shape errors are safe to report;
+            # secret values are never included in these messages.
+            app.state.startup_failure = {"kind": "configuration", "detail": str(exc)}
+            yield
+            return
+        except Exception:
+            # Do not expose a DSN, credentials, or driver traceback to callers.
+            app.state.startup_failure = {"kind": "database", "detail": "database initialization failed"}
+            yield
+            return
         if enable_scheduler:
             scheduler = Scheduler(
                 app.state.store,
@@ -80,6 +93,9 @@ def create_app(settings: Settings | None = None, github=None, validate: bool = T
 
     @application.get("/health")
     def health():
+        failure = getattr(application.state, "startup_failure", None)
+        if failure:
+            return JSONResponse({"status": "unavailable", **failure}, status_code=503)
         return {"status": "ok"}
 
     # Explicit injected dependencies may be used without lifespan in unit tests.
