@@ -5,9 +5,11 @@
     "frontend"
   ],
   "scripts": {
-    "build": "npm --prefix frontend run build"
+    "build": "npm run build --workspace frontend"
   },
   "dependencies": {
-    "next": "15.5.2"
+    "next": "15.5.2",
+    "react": "19.1.1",
+    "react-dom": "19.1.1"
   }
 }

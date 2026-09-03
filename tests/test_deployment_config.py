@@ -22,6 +22,11 @@ def test_vercel_json_references_the_next_app_and_python_function():
     text = json.dumps(config)
     assert package["workspaces"] == ["frontend"]
     assert package["dependencies"]["next"]
+    assert package["dependencies"]["react"] == "19.1.1"
+    assert package["dependencies"]["react-dom"] == "19.1.1"
+    assert (ROOT / "package-lock.json").is_file()
+    assert config["installCommand"] == "npm ci"
+    assert config["buildCommand"] == "npm run build --workspace frontend"
     assert "api/index.py" in text
     assert "crons" in config and config["crons"]
     assert any("/api/cron/scheduler" in c.get("path", "") for c in config["crons"])

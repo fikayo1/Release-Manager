@@ -5,6 +5,7 @@ __pycache__/
 *.db
 .shipyard/
 frontend/node_modules/
+/node_modules/
 frontend/.next/
 frontend/test-results/
 frontend/playwright-report/
