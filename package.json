@@ -1,0 +1,13 @@
+{
+  "name": "release-manager-vercel-root",
+  "private": true,
+  "workspaces": [
+    "frontend"
+  ],
+  "scripts": {
+    "build": "npm --prefix frontend run build"
+  },
+  "dependencies": {
+    "next": "15.5.2"
+  }
+}

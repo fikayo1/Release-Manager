@@ -18,7 +18,10 @@ FORBIDDEN = [
 
 def test_vercel_json_references_the_next_app_and_python_function():
     config = json.loads((ROOT / "vercel.json").read_text())
+    package = json.loads((ROOT / "package.json").read_text())
     text = json.dumps(config)
+    assert package["workspaces"] == ["frontend"]
+    assert package["dependencies"]["next"]
     assert "api/index.py" in text
     assert "crons" in config and config["crons"]
     assert any("/api/cron/scheduler" in c.get("path", "") for c in config["crons"])
