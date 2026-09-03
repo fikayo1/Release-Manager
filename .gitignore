@@ -10,3 +10,5 @@ frontend/.next/
 frontend/test-results/
 frontend/playwright-report/
 .vercel
+**/.vercel/
+**/.env*
