@@ -32,9 +32,12 @@ def test_c3_selection_survives_a_fresh_process_on_the_same_file(tmp_path, journa
         assert client.get("/api/github").json()["selected_repository"] == REPO_A
 
     # A brand-new Store object on the exact same path == a fresh process.
-    assert Store(str(db)).github_connection()["selected_repository"] == REPO_A
+    assert Store(str(db)).user_github_connection("github:42")["selected_repository"] == REPO_A
 
     with TestClient(build_app(db)) as restarted:
+        # A new browser session signs in again; the durable user-owned
+        # connection and repository choice are then recovered.
+        complete_oauth(restarted)
         settings = restarted.get("/api/github").json()
         assert settings["status"] == "connected"
         assert settings["selected_repository"] == REPO_A

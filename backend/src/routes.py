@@ -88,7 +88,7 @@ def client_for_pack(request: Request, pack_id: str):
         return legacy
     pack = store.pack(pack_id)
     repository = store.scan(pack["scan_id"])["repository"]
-    return provider(repository)
+    return provider(repository, current_user(request))
 
 
 class Decision(BaseModel):
@@ -140,13 +140,18 @@ def _pack_view(store, pack):
 def index(request: Request):
     """Retain the original JSON service discovery response."""
     store, _ = deps(request)
-    return {"service": "release-manager", "audit": store.audit()[-20:]}
+    user_id = current_user(request)
+    # Injected legacy unit-test apps have no OAuth layer. Every configured
+    # browser deployment gets only the caller's audit history.
+    audit = store.scoped_audit(user_id) if user_id else store.audit()
+    return {"service": "release-manager", "audit": audit[-20:]}
 
 
 @router.get("/review", name="review_list")
 def review_list(request: Request, selected: str | None = None):
     store, _ = deps(request)
-    packs = [_pack_view(store, pack) for pack in store.packs()]
+    user_id = current_user(request)
+    packs = [_pack_view(store, pack) for pack in (store.scoped_packs(user_id) if user_id else store.packs())]
     ids = {pack["id"] for pack in packs}
     selected_id = selected if selected in ids else (packs[0]["id"] if packs else None)
     return templates.TemplateResponse(
@@ -156,6 +161,7 @@ def review_list(request: Request, selected: str | None = None):
 
 @router.get("/review/packs/{pack_id}", name="review_detail")
 def review_detail(pack_id: str, request: Request):
+    require_owner(request, "pack", pack_id)
     try:
         context = _detail_context(request, pack_id)
     except KeyError:
@@ -232,10 +238,6 @@ def github_callback(request: Request, state: str = "", code: str = "", error: st
         user_id = store.bind_session(session_id, account["login"], account.get("id"), now())
         store.save_user_github_connection(user_id, account["login"], account.get("id"), token,
                                           refresh, expires_at, now())
-        # Maintain the legacy projection for scheduler/backward compatibility;
-        # protected requests exclusively use the user-scoped row above.
-        store.save_github_connection(account["login"], account.get("id"), token,
-                                     refresh, expires_at, now())
     except OAuthError as exc:
         status = "denied" if error else "invalid_state"
     except Exception:
@@ -253,17 +255,19 @@ def github_settings(request: Request):
         # status before the first authenticated identity exists.
         if exc.status_code != 401: raise
         user_id = None
-    connection = store.user_github_connection(user_id) if user_id else store.github_connection()
+    connection = store.user_github_connection(user_id) if user_id else None
     result = {"status": connection["status"] if connection else "disconnected",
               "account": connection["login"] if connection else None,
               "selected_repository": connection["selected_repository"] if connection else None,
               "repositories": [], "authorize_url": "/auth/github"}
     if connection and connection["status"] == "connected":
-        credentials = store.user_github_credentials(user_id) if user_id else store.github_credentials()
+        credentials = store.user_github_credentials(user_id) if user_id else None
         try:
             result["repositories"] = account_client(request, credentials["access_token"]).repositories()
         except GitHubRevokedError:
-            store.mark_github_revoked(now()); result["status"] = "revoked"
+            if user_id:
+                store.mark_user_github_revoked(user_id, now())
+            result["status"] = "revoked"
     return result
 
 @router.put("/api/github/repository")
@@ -272,19 +276,16 @@ def choose_repository(data: RepositorySelection, request: Request):
     if data.full_name.count("/") != 1 or any(not p for p in data.full_name.split("/")):
         raise HTTPException(422, "Select a valid authorized repository")
     store = request.app.state.store
-    credentials = store.user_github_credentials(user_id) if user_id else store.github_credentials()
+    credentials = store.user_github_credentials(user_id) if user_id else None
     if not credentials or credentials["status"] != "connected":
         raise HTTPException(409, "Reconnect GitHub before selecting a repository")
     try:
         allowed = {r["full_name"] for r in account_client(request, credentials["access_token"]).repositories()}
     except GitHubRevokedError:
-        store.mark_github_revoked(now()); raise HTTPException(409, "Reconnect GitHub before selecting a repository")
+        store.mark_user_github_revoked(user_id, now()); raise HTTPException(409, "Reconnect GitHub before selecting a repository")
     if data.full_name not in allowed:
         raise HTTPException(422, "Repository is not authorized or accessible")
-    if user_id:
-        store.select_user_repository(user_id, data.full_name, now())
-        store.select_repository(data.full_name, now())  # scheduler compatibility projection
-    else: store.select_repository(data.full_name, now())
+    store.select_user_repository(user_id, data.full_name, now())
     return {"selected_repository": data.full_name}
 
 @router.post("/api/scans", status_code=201)
@@ -312,7 +313,7 @@ def start(request: Request):
             return result
         finally:
             store.release_user_lease(operation_id)
-    return OperationRunner(store, gh, client_provider=getattr(request.app.state,"github_provider",None)).run("manual")
+    raise HTTPException(401, "Authentication required")
 
 @router.get("/api/scans")
 def list_scans(request: Request):

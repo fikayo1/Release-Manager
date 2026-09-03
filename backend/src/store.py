@@ -112,12 +112,7 @@ class Store:
 
     def scoped_operations(self, user_id):
         owned = {r["resource_id"] for r in self._owned_rows("operation", user_id)}
-        # Scheduler operations predate ownership assignment and are trusted,
-        # non-browser work; include only those matching this user's repository.
-        connection = self.user_github_connection(user_id)
-        repository = connection.get("selected_repository") if connection else None
-        return [item for item in self.operations()
-                if item["id"] in owned or (item["source"] == "scheduled" and item["repository"] == repository)]
+        return [item for item in self.operations() if item["id"] in owned]
 
     def scoped_scans(self, user_id):
         with self.connect() as db:
@@ -139,12 +134,27 @@ class Store:
             return db.execute("SELECT COUNT(*) AS n FROM user_scan_leases WHERE user_id=?", (user_id,)).fetchone()["n"]
 
     def acquire_user_lease(self, user_id, operation_id, now, expires, limit):
-        with self.connect() as db:
+        """Atomically admit a lease under the per-user concurrency limit."""
+        db = self.connect()
+        try:
+            if self.dialect == "sqlite":
+                db.execute("BEGIN IMMEDIATE")
+            else:
+                # Serialize admission for this user without blocking other users.
+                db.execute("SELECT pg_advisory_xact_lock(hashtext(?))", ("scan:" + user_id,))
             db.execute("DELETE FROM user_scan_leases WHERE expires_at<=?", (now,))
             count = db.execute("SELECT COUNT(*) AS n FROM user_scan_leases WHERE user_id=?", (user_id,)).fetchone()["n"]
-            if count >= limit: return False
+            if count >= limit:
+                db.rollback()
+                return False
             db.execute("INSERT INTO user_scan_leases VALUES(?,?,?,?)", (user_id,operation_id,expires,now))
+            db.commit()
             return True
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
 
     def release_user_lease(self, operation_id):
         with self.connect() as db: db.execute("DELETE FROM user_scan_leases WHERE operation_id=?", (operation_id,))
@@ -193,6 +203,10 @@ class Store:
     def mark_github_revoked(self, now):
         with self.connect() as db:
             db.execute("UPDATE github_connection SET status='revoked',updated_at=? WHERE id=1", (now,))
+
+    def mark_user_github_revoked(self, user_id, now):
+        with self.connect() as db:
+            db.execute("UPDATE user_github_connections SET status='revoked',updated_at=? WHERE user_id=?", (now, user_id))
 
     def select_repository(self, full_name, now):
         with self.connect() as db:
@@ -413,12 +427,14 @@ class Store:
                 publication["approver"],
             )
 
-    def create_operation(self, oid, source, repository, now, scheduled_for=None):
+    def create_operation(self, oid, source, repository, now, scheduled_for=None, user_id=None):
         with self.connect() as db:
-            db.execute("INSERT INTO operations(id,source,repository,status,started_at,scheduled_for) VALUES(?,?,?,'running',?,?)", (oid,source,repository,now,scheduled_for))
+            db.execute("INSERT INTO operations(id,source,repository,status,started_at,scheduled_for,user_id) VALUES(?,?,?,'running',?,?,?)", (oid,source,repository,now,scheduled_for,user_id))
+            if user_id:
+                db.execute("INSERT INTO resource_owners(kind,resource_id,user_id) VALUES('operation',?,?) ON CONFLICT(kind,resource_id) DO NOTHING", (oid,user_id))
             self.event(db,"operation_started",oid,now,{"source":source,"repository":repository})
 
-    def record_suppressed_operation(self, source, repository, now, scheduled_for=None, reason="duplicate_slot"):
+    def record_suppressed_operation(self, source, repository, now, scheduled_for=None, reason="duplicate_slot", user_id=None):
         """Durably audit an invocation suppressed before a new operation row.
 
         Scheduled slots deliberately have one canonical operation row. Duplicate
@@ -428,8 +444,8 @@ class Store:
         with self.connect() as db:
             if source == "scheduled" and scheduled_for:
                 row = db.execute(
-                    "SELECT id FROM operations WHERE source='scheduled' AND scheduled_for=?",
-                    (scheduled_for,),
+                    "SELECT id FROM operations WHERE source='scheduled' AND scheduled_for=? AND ((user_id=? ) OR (user_id IS NULL AND ? IS NULL))",
+                    (scheduled_for, user_id, user_id),
                 ).fetchone()
             else:
                 row = None
@@ -491,6 +507,16 @@ class Store:
                     operation["pack_status"] = pack["status"] if pack else None
             return operations
 
+    def scheduled_users(self):
+        """Return enabled schedules with their owner's connection metadata."""
+        with self.connect() as db:
+            rows = db.execute("""SELECT s.user_id,s.expression,s.enabled,s.updated_at,
+                g.selected_repository,g.status FROM user_schedules s
+                JOIN user_github_connections g ON g.user_id=s.user_id
+                WHERE s.enabled=1 AND g.status='connected' AND g.selected_repository IS NOT NULL
+                ORDER BY s.user_id""").fetchall()
+        return [dict(row) for row in rows]
+
     def user_schedule(self, user_id):
         from .cron import next_run
         from datetime import datetime, timezone
@@ -511,10 +537,6 @@ class Store:
                 ON CONFLICT(user_id) DO UPDATE SET expression=excluded.expression,enabled=excluded.enabled,updated_at=excluded.updated_at""",
                        (user_id, expression.strip(), int(enabled), now))
             self.event(db, "schedule", user_id, now, {"expression": expression.strip(), "enabled": bool(enabled)})
-            # Keep the legacy scheduler projection in sync until the scheduler
-            # itself iterates user_schedules directly.
-            db.execute("UPDATE schedules SET expression=?,enabled=?,updated_at=? WHERE id=1",
-                       (expression.strip(), int(enabled), now))
         return self.user_schedule(user_id)
 
     def scoped_audit(self, user_id):

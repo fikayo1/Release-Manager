@@ -19,19 +19,19 @@ class OperationRunner:
     def run(self, source="manual", scheduled_for=None, user_id=None):
         operation_id=str(uuid4()); moment=self.clock(); now=iso(moment)
         if self.client_provider:
-            connection=self.store.github_connection()
+            connection=self.store.user_github_connection(user_id) if user_id else None
             repository=connection.get("selected_repository") if connection and connection.get("status")=="connected" else None
             if not repository:
                 repository="unconfigured"
-                self.store.create_operation(operation_id,source,repository,now,scheduled_for)
+                self.store.create_operation(operation_id,source,repository,now,scheduled_for,user_id=user_id)
                 self.store.finish_operation(operation_id,"reconnect_required",now,error="Connect GitHub and select a repository")
                 return self.store.operation(operation_id)
-            github=self.client_provider(repository)
+            github=self.client_provider(repository, user_id)
         else:
             github=self.github
             repository=f"{github.owner}/{github.repo}"
         try:
-            self.store.create_operation(operation_id,source,repository,now,scheduled_for)
+            self.store.create_operation(operation_id,source,repository,now,scheduled_for,user_id=user_id)
         except Exception as exc:
             if not is_integrity_error(exc):
                 raise
@@ -39,13 +39,13 @@ class OperationRunner:
             # receipt to it so duplicate invocations are not merely synthetic
             # in-memory outcomes.
             claimed_id = self.store.record_suppressed_operation(
-                source, repository, now, scheduled_for, "duplicate_slot"
+                source, repository, now, scheduled_for, "duplicate_slot", user_id=user_id
             )
             return {"id": claimed_id, "source": source, "repository": repository,
                     "status": "completed", "result": "suppressed", "error": None,
                     "scan_id": None, "pack_id": None, "started_at": now,
                     "finished_at": now, "scheduled_for": scheduled_for}
-        if not self.store.acquire_lease(self.owner,operation_id,now,iso(moment+timedelta(seconds=self.lease_seconds))):
+        if user_id is None and not self.store.acquire_lease(self.owner,operation_id,now,iso(moment+timedelta(seconds=self.lease_seconds))):
             self.store.finish_operation(operation_id,"suppressed",now)
             return self.store.operation(operation_id)
         stop_renewal = Event()
@@ -70,5 +70,6 @@ class OperationRunner:
         finally:
             stop_renewal.set()
             renewal.join(timeout=1)
-            self.store.release_lease(self.owner,operation_id)
+            if user_id is None:
+                self.store.release_lease(self.owner,operation_id)
         return self.store.operation(operation_id)

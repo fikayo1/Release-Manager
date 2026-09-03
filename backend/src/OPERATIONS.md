@@ -4,7 +4,7 @@ See [`README.md`](../README.md) for local startup and the complete Vercel deploy
 
 The Vercel entrypoint `api/index.py` disables the lifespan polling scheduler. Scheduled work there runs only when Vercel Cron sends `GET /api/cron/scheduler` with its `Authorization: Bearer <CRON_SECRET>` and documented `User-Agent: vercel-cron/1.0`; the route verifies both before forwarding to protected `POST /scheduler/tick`. Standalone `uvicorn src.app:app` retains the in-process UTC scheduler.
 
-Production persistence requires managed Postgres selected by `DATABASE_URL` or `POSTGRES_URL`. A production cutover starts empty; there is no SQLite import. Automatic versioned migrations are idempotent and serialized under a Postgres advisory transaction lock. An operator may safely run them explicitly with `.venv/bin/python -m src.migrate`. SQLite selected by the absence of both URLs is for local development and CI; its database includes OAuth credentials and must be protected and backed up.
+Production persistence requires managed Postgres selected by `DATABASE_URL` or `POSTGRES_URL`. A production cutover starts empty; there is no SQLite import. Automatic versioned migrations are idempotent and serialized under a Postgres advisory transaction lock. From the repository root, an operator may safely run them explicitly with `PYTHONPATH=backend .venv/bin/python -m src.migrate`. SQLite selected by the absence of both URLs is for local development and CI; its database includes OAuth credentials and must be protected and backed up.
 
 GitHub access is OAuth-only. The callback is the web-origin `/auth/github/callback`; the Next.js route forwards the opaque HttpOnly session cookie to FastAPI. A selected repository is captured on each scan, so later selection changes affect only future scans and never retarget existing publication or reconciliation work.
 
@@ -21,8 +21,9 @@ OAuth access and refresh tokens are **encrypted at rest** with a stdlib-only
 authenticated construction (`src/crypto.py`). The key comes from
 `TOKEN_ENCRYPTION_KEY`, or is derived from `SESSION_SECRET` when that variable
 is unset; rotating `TOKEN_ENCRYPTION_KEY` re-keys token storage without
-touching the session key. `store.github_connection()` never returns credential
-columns; only `store.github_credentials()` decrypts, server-side.
+touching the session key. The deprecated singleton accessors are not used by
+the application; only `store.user_github_credentials(user_id)` decrypts a
+credential, server-side, for that same user.
 
 `MAX_CONCURRENT_SCANS` (integer `1..10`, clamped, default `1`) caps concurrent
 in-flight scans per user. Trusted scheduled scans authenticate with

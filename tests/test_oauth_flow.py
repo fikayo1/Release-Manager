@@ -97,9 +97,8 @@ def test_access_token_never_leaves_the_backend(tmp_path, journal):
                 assert CANARY_TOKEN not in value
 
         store = app.state.store
-        assert CANARY_TOKEN not in str(store.github_connection())
-        assert "access_token" not in store.github_connection()
-        assert store.github_credentials()["access_token"] == CANARY_TOKEN
+        assert store.github_connection() is None
+        assert store.user_github_credentials("github:42")["access_token"] == CANARY_TOKEN
 
         # Client reprs and error text redact the token.
         assert CANARY_TOKEN not in repr(FakeAccountGitHub(CANARY_TOKEN))

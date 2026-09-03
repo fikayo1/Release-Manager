@@ -79,6 +79,6 @@ def test_reprs_and_errors_redact_secrets(client, tmp_path):
 def test_connection_view_excludes_credentials_but_credentials_accessor_returns_token(client):
     complete_oauth(client)
     store = client.app.state.store
-    assert "access_token" not in store.github_connection()
-    assert CANARY_TOKEN not in str(store.github_connection())
-    assert store.github_credentials()["access_token"] == CANARY_TOKEN
+    assert "access_token" not in store.user_github_connection("github:42")
+    assert CANARY_TOKEN not in str(store.user_github_connection("github:42"))
+    assert store.user_github_credentials("github:42")["access_token"] == CANARY_TOKEN

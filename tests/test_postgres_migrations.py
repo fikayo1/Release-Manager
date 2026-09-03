@@ -56,7 +56,7 @@ class PostgresConnection:
             return Cursor(rowcount=1)
         # The strict syntax checks above are the relevant execution semantics;
         # all CREATE/ALTER/seed statements are accepted like PostgreSQL DDL.
-        assert normalized.startswith(("CREATE ", "ALTER ", "INSERT INTO "))
+        assert normalized.startswith(("CREATE ", "ALTER ", "DROP ", "INSERT INTO "))
         return Cursor(rowcount=1)
 
     def commit(self):

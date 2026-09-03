@@ -17,7 +17,7 @@ npm --prefix frontend run dev -- --hostname 127.0.0.1 --port 13000
 
 Open **http://127.0.0.1:13000/settings/github**, choose **Continue with GitHub**, authorize the `repo` scope, and select a repository. Dashboard routes are `/`, `/releases`, `/operations`, `/settings/github`, and `/settings/schedule`; release details are `/releases/{id}`. Backend health is **http://127.0.0.1:8000/health**. `RELEASE_MANAGER_API_URL` is server-only; never expose secrets through `NEXT_PUBLIC_` variables.
 
-The singleton schedule has five cron fields and runs in UTC. Standalone FastAPI owns an in-process scheduler; `SCHEDULER_INTERVAL_SECONDS` controls its polling interval. Navigation and refresh are read-only: only **Scan now** or a due enabled schedule starts a scan. Operations, leases, scans, release packs, decisions, publication attempts, reconciliation, audit records, OAuth tokens, and repository selection are persistent. Approval requires an actor and reason and immediately attempts publication. An uncertain publication must be reconciled before retrying.
+Each connected GitHub user has an independent five-field UTC schedule. Standalone FastAPI owns an in-process scheduler; `SCHEDULER_INTERVAL_SECONDS` controls its polling interval. Navigation and refresh are read-only: only **Scan now** or a due enabled schedule starts a scan. Operations, leases, scans, release packs, decisions, publication attempts, reconciliation, audit records, OAuth tokens, and repository selection are persistent and user-owned. Approval requires an actor and reason and immediately attempts publication. An uncertain publication must be reconciled before retrying.
 
 ## Deploy to Vercel
 

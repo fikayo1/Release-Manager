@@ -100,7 +100,7 @@ def test_c4_concurrent_ticks_converge_to_one_operation(client, journal):
 
     def run_once():
         runner = OperationRunner(store, None, client_provider=client.app.state.github_provider)
-        return runner.run("scheduled", slot)
+        return runner.run("scheduled", slot, "github:42")
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
         results = [f.result() for f in [pool.submit(run_once), pool.submit(run_once)]]
@@ -113,5 +113,5 @@ def test_c4_concurrent_ticks_converge_to_one_operation(client, journal):
                for event in scheduled[0]["activity"])
 
     # A tick after completion for the same slot does not re-run it.
-    after = OperationRunner(store, None, client_provider=client.app.state.github_provider).run("scheduled", slot)
+    after = OperationRunner(store, None, client_provider=client.app.state.github_provider).run("scheduled", slot, "github:42")
     assert after["result"] == "suppressed"

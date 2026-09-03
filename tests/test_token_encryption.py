@@ -26,9 +26,9 @@ def test_sqlite_file_never_contains_the_plaintext_token(tmp_path, journal):
     with TestClient(app) as client:
         complete_oauth(client)
         store = app.state.store
-        assert store.github_credentials()["access_token"] == CANARY_TOKEN
-        assert "access_token" not in store.github_connection()
-        assert CANARY_TOKEN not in str(store.github_connection())
+        assert store.user_github_credentials("github:42")["access_token"] == CANARY_TOKEN
+        assert "access_token" not in store.user_github_connection("github:42")
+        assert CANARY_TOKEN not in str(store.user_github_connection("github:42"))
 
     raw = db.read_bytes()
     assert CANARY_TOKEN.encode() not in raw

@@ -5,6 +5,16 @@ async function operationCount(page: Page) {
   return (await response.json()).length;
 }
 
+async function connectAndSelect(page: Page) {
+  await page.goto('/settings/github');
+  if (await page.getByText('Connected as').count()) return;
+  await page.getByRole('link', {name:'Continue with GitHub'}).click();
+  await expect(page.getByText('Connected as')).toBeVisible();
+  await page.getByLabel('Repository').selectOption('fixture/repository-a');
+  await page.getByRole('button', {name:'Save repository'}).click();
+  await expect(page.getByRole('status')).toContainText('Saved fixture/repository-a');
+}
+
 test.describe.serial('operator workflow', () => {
   test('OAuth callback rejects a missing state', async ({page}) => {
     await page.goto('http://127.0.0.1:18000/auth/github/callback?code=accepted');
@@ -49,6 +59,7 @@ test.describe.serial('operator workflow', () => {
   });
 
   test('desktop navigation is read-only and manual scan creates a draft', async ({page}) => {
+    await connectAndSelect(page);
     await page.goto('/');
     await expect(page.getByRole('heading', {name: 'Release overview'})).toBeVisible();
     const before = await operationCount(page);
@@ -82,6 +93,7 @@ test.describe.serial('operator workflow', () => {
   });
 
   test('schedule validates, persists, disables, and reports heartbeat', async ({page}) => {
+    await connectAndSelect(page);
     await page.goto('/settings/schedule');
     await page.getByLabel('Cron expression (UTC)').fill('bad cron');
     await page.getByRole('button', {name: 'Save schedule'}).click();
@@ -101,6 +113,7 @@ test.describe.serial('operator workflow', () => {
   });
 
   test('approval validates and publishes with an audit receipt', async ({page}) => {
+    await connectAndSelect(page);
     await page.goto('/releases');
     await page.locator('tbody a').first().click();
     await page.getByRole('button', {name: 'Approve and publish'}).click();
@@ -115,6 +128,7 @@ test.describe.serial('operator workflow', () => {
   });
 
   test('mobile routes remain usable', async ({page}) => {
+    await connectAndSelect(page);
     await page.setViewportSize({width: 390, height: 844});
     for (const [path, title] of [['/', 'Release overview'], ['/releases', 'Release packs'], ['/operations', 'Operations'], ['/settings/schedule', 'UTC scan schedule']]) {
       await page.goto(path);

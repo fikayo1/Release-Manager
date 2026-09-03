@@ -59,6 +59,12 @@ MIGRATIONS = {
             "CREATE TABLE IF NOT EXISTS user_scan_leases(user_id TEXT NOT NULL REFERENCES users(id), operation_id TEXT PRIMARY KEY, expires_at TEXT NOT NULL, heartbeat_at TEXT NOT NULL)",
             "CREATE TABLE IF NOT EXISTS pack_keys(user_id TEXT NOT NULL, repository TEXT NOT NULL, version TEXT NOT NULL, pack_id TEXT NOT NULL UNIQUE REFERENCES packs(id), PRIMARY KEY(user_id,repository,version))",
         ]),
+        (5, [
+            "ALTER TABLE operations ADD COLUMN user_id TEXT REFERENCES users(id)",
+            "DROP INDEX IF EXISTS scheduled_operation_slot",
+            "CREATE UNIQUE INDEX IF NOT EXISTS scheduled_operation_user_slot ON operations(user_id,scheduled_for) WHERE source='scheduled' AND scheduled_for IS NOT NULL AND user_id IS NOT NULL",
+            "CREATE UNIQUE INDEX IF NOT EXISTS scheduled_operation_legacy_slot ON operations(scheduled_for) WHERE source='scheduled' AND scheduled_for IS NOT NULL AND user_id IS NULL",
+        ]),
     ),
     "postgres": (
         (1, [
@@ -87,6 +93,12 @@ MIGRATIONS = {
             "CREATE TABLE IF NOT EXISTS user_schedules(user_id TEXT PRIMARY KEY REFERENCES users(id), expression TEXT NOT NULL, enabled INTEGER NOT NULL, updated_at TEXT NOT NULL)",
             "CREATE TABLE IF NOT EXISTS user_scan_leases(user_id TEXT NOT NULL REFERENCES users(id), operation_id TEXT PRIMARY KEY, expires_at TEXT NOT NULL, heartbeat_at TEXT NOT NULL)",
             "CREATE TABLE IF NOT EXISTS pack_keys(user_id TEXT NOT NULL, repository TEXT NOT NULL, version TEXT NOT NULL, pack_id TEXT NOT NULL UNIQUE REFERENCES packs(id), PRIMARY KEY(user_id,repository,version))",
+        ]),
+        (5, [
+            "ALTER TABLE operations ADD COLUMN IF NOT EXISTS user_id TEXT REFERENCES users(id)",
+            "DROP INDEX IF EXISTS scheduled_operation_slot",
+            "CREATE UNIQUE INDEX IF NOT EXISTS scheduled_operation_user_slot ON operations(user_id,scheduled_for) WHERE source='scheduled' AND scheduled_for IS NOT NULL AND user_id IS NOT NULL",
+            "CREATE UNIQUE INDEX IF NOT EXISTS scheduled_operation_legacy_slot ON operations(scheduled_for) WHERE source='scheduled' AND scheduled_for IS NOT NULL AND user_id IS NULL",
         ]),
     ),
 }

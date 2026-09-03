@@ -55,8 +55,9 @@ def create_app(settings: Settings | None = None, github=None, validate: bool = T
                     repository_factory = github_client_factory or GitHubClient
                     app.state.github_client_factory = repository_factory
 
-                    def provider(slug):
-                        credentials = app.state.store.github_credentials()
+                    def provider(slug, user_id):
+                        """Resolve a client from the explicit owning user's OAuth grant."""
+                        credentials = app.state.store.user_github_credentials(user_id)
                         if not credentials or credentials["status"] != "connected":
                             raise RuntimeError("GitHub connection requires reconnect")
                         owner, repo = slug.split("/", 1)

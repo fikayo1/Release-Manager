@@ -19,28 +19,27 @@ class Scheduler:
         # scheduler from one that was never started.
         with self.store.connect() as db:
             db.execute("UPDATE scheduler_state SET heartbeat_at=? WHERE id=1",(heartbeat.isoformat(),))
-        schedule=self.store.schedule()
-        if not schedule["enabled"] or not matches(schedule["expression"],current):
-            return {"slot": slot, "ran": False, "reason": "not_due"}
-        # The operation's durable scheduled_for slot is the claim. Marking a
-        # slot only after the operation exists means a crash before creation is
-        # retried after restart, while a completed operation is never duplicated.
-        claimed = next((item for item in self.store.operations()
-                        if item["source"] == "scheduled" and item["scheduled_for"] == slot), None)
-        if claimed:
-            # Repeat HTTP ticks are operations too: persist a suppression receipt
-            # against the canonical slot owner without creating a second slot row.
-            self.store.record_suppressed_operation(
-                "scheduled", claimed["repository"], heartbeat.isoformat(), slot, "already_claimed"
-            )
-            return {"slot": slot, "ran": False, "reason": "already_claimed",
-                    "operation_id": claimed["id"], "result": "suppressed"}
-        result=await asyncio.to_thread(self.runner.run,"scheduled",slot)
-        if result.get("id") and result.get("result") != "suppressed":
+        outcomes = []
+        for schedule in self.store.scheduled_users():
+            if not matches(schedule["expression"], current):
+                continue
+            user_id = schedule["user_id"]
+            claimed = next((item for item in self.store.scoped_operations(user_id)
+                            if item["source"] == "scheduled" and item["scheduled_for"] == slot), None)
+            if claimed:
+                self.store.record_suppressed_operation("scheduled", claimed["repository"], heartbeat.isoformat(), slot,
+                                                       "already_claimed", user_id=user_id)
+                outcomes.append({"user_id": user_id, "id": claimed["id"], "result": "suppressed"})
+                continue
+            result = await asyncio.to_thread(self.runner.run, "scheduled", slot, user_id)
+            outcomes.append({"user_id": user_id, **result})
+        if outcomes:
             with self.store.connect() as db:
-                db.execute("UPDATE scheduler_state SET last_slot=?,last_operation_id=?,last_run_at=?,last_result=?,last_error=? WHERE id=1",(slot,result["id"],heartbeat.isoformat(),result["result"],result.get("error")))
-        return {"slot": slot, "ran": True, "result": result.get("result"),
-                "operation_id": result.get("id"), "repository": result.get("repository")}
+                last = outcomes[-1]
+                db.execute("UPDATE scheduler_state SET last_slot=?,last_operation_id=?,last_run_at=?,last_result=?,last_error=? WHERE id=1",
+                           (slot, last.get("id"), heartbeat.isoformat(), last.get("result"), last.get("error")))
+        return {"slot": slot, "ran": any(item.get("result") != "suppressed" for item in outcomes), "outcomes": outcomes,
+                "reason": None if outcomes else "not_due"}
     async def loop(self):
         while True:
             try:
