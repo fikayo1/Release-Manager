@@ -14,6 +14,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from .config import Settings
+from .crypto import token_key
 from .db import resolve_dialect
 from .github_client import GitHubAccountClient, GitHubClient
 from .github_oauth import OAuthService
@@ -25,7 +26,8 @@ from .scheduler import Scheduler
 
 def _build_store(cfg: Settings) -> Store:
     dialect = resolve_dialect(cfg)
-    return Store(cfg.database, dialect=dialect, database_url=cfg.database_url)
+    return Store(cfg.database, dialect=dialect, database_url=cfg.database_url,
+                 token_key=token_key(cfg))
 
 
 def create_app(settings: Settings | None = None, github=None, validate: bool = True,

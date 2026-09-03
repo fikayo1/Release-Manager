@@ -8,4 +8,27 @@ Production persistence requires managed Postgres selected by `DATABASE_URL` or `
 
 GitHub access is OAuth-only. The callback is the web-origin `/auth/github/callback`; the Next.js route forwards the opaque HttpOnly session cookie to FastAPI. A selected repository is captured on each scan, so later selection changes affect only future scans and never retarget existing publication or reconciliation work.
 
+## Per-user isolation, token encryption, and concurrency
+
+One authenticated GitHub account is one user. There is no shared organization,
+team, or application role. Every domain row (GitHub connection, OAuth tokens,
+repository selection, scans, packs, decisions, schedule, operations, audit) is
+owned by a `user_id`. Protected API routes return `401` without a session, a
+generic `403` across users, and `429` at the scan-concurrency limit; protected
+dashboard routes redirect unauthenticated browsers to `/settings/github`.
+
+OAuth access and refresh tokens are **encrypted at rest** with a stdlib-only
+authenticated construction (`src/crypto.py`). The key comes from
+`TOKEN_ENCRYPTION_KEY`, or is derived from `SESSION_SECRET` when that variable
+is unset; rotating `TOKEN_ENCRYPTION_KEY` re-keys token storage without
+touching the session key. `store.github_connection()` never returns credential
+columns; only `store.github_credentials()` decrypts, server-side.
+
+`MAX_CONCURRENT_SCANS` (integer `1..10`, clamped, default `1`) caps concurrent
+in-flight scans per user. Trusted scheduled scans authenticate with
+`CRON_SECRET` and are exempt from that per-user cap.
+
+The legacy `GITHUB_TOKEN` / `GITHUB_OWNER` / `GITHUB_REPO` triple is a
+topology-compatibility artifact only and is ignored by the OAuth path.
+
 Approval and rejection require an actor and reason. Approval immediately publishes. An uncertain publish must be reconciled before retrying. Navigation is read-only; explicit **Scan now** or a due schedule starts work. Inspect `/operations`, `/releases`, and backend `GET /api/audit` for durable outcomes and receipts.

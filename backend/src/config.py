@@ -31,6 +31,11 @@ class Settings:
     database_url: str = ""
     # Shared secret Vercel Cron sends as ``Authorization: Bearer``.
     cron_secret: str = ""
+    # Per-user cap on concurrent in-flight scans (integer, clamped to 1..10).
+    max_concurrent_scans: int = 1
+    # Optional explicit key for encrypting OAuth tokens at rest. Empty ->
+    # derived from ``session_secret`` (see :mod:`src.crypto`).
+    token_encryption_key: str = ""
 
     def __post_init__(self):
         missing = [env for attr, env in _OAUTH_ENV if not getattr(self, attr).strip()]
@@ -38,6 +43,14 @@ class Settings:
             raise ValueError("Missing required configuration: " + ", ".join(missing))
         if not self.oauth_callback_url.endswith("/auth/github/callback"):
             raise ValueError("GITHUB_OAUTH_CALLBACK_URL must end with /auth/github/callback")
+
+    @staticmethod
+    def _clamp_scans(raw: str) -> int:
+        try:
+            value = int((str(raw) or "").strip() or "1")
+        except ValueError:
+            value = 1
+        return max(1, min(10, value))
 
     @classmethod
     def from_env(cls):
@@ -51,6 +64,8 @@ class Settings:
             web_url=os.getenv("RELEASE_MANAGER_WEB_URL", ""),
             database_url=os.getenv("DATABASE_URL", "") or os.getenv("POSTGRES_URL", ""),
             cron_secret=os.getenv("CRON_SECRET", ""),
+            max_concurrent_scans=cls._clamp_scans(os.getenv("MAX_CONCURRENT_SCANS", "1")),
+            token_encryption_key=os.getenv("TOKEN_ENCRYPTION_KEY", ""),
         )
 
     @property
@@ -60,6 +75,7 @@ class Settings:
     def __repr__(self):
         return (
             f"Settings(database={self.database!r}, scheduler_interval={self.scheduler_interval!r}, "
+            f"max_concurrent_scans={self.max_concurrent_scans!r}, "
             "oauth_client_id='***', oauth_client_secret='***', session_secret='***', "
-            "cron_secret='***', database_url='***')"
+            "cron_secret='***', database_url='***', token_encryption_key='***')"
         )

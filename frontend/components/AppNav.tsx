@@ -1,2 +1,27 @@
+'use client';
 import Link from 'next/link';
-export function AppNav(){return <nav aria-label="Primary"><Link href="/">Overview</Link><Link href="/releases">Releases</Link><Link href="/operations">Operations</Link><Link href="/settings/schedule">Schedule</Link><Link href="/settings/github">GitHub</Link></nav>}
+import { usePathname } from 'next/navigation';
+
+const LINKS: [string, string][] = [
+  ['/', 'Overview'],
+  ['/releases', 'Releases'],
+  ['/operations', 'Operations'],
+  ['/settings/schedule', 'Schedule'],
+  ['/settings/github', 'GitHub'],
+];
+
+export function AppNav() {
+  const pathname = usePathname();
+  return (
+    <nav aria-label="Primary">
+      {LINKS.map(([href, label]) => {
+        const active = href === '/' ? pathname === '/' : pathname.startsWith(href);
+        return (
+          <Link key={href} href={href} aria-current={active ? 'page' : undefined}>
+            {label}
+          </Link>
+        );
+      })}
+    </nav>
+  );
+}

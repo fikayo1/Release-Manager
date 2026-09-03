@@ -40,6 +40,56 @@ After deployment, open **https://<production-domain>/settings/github**, click **
 
 Without `DATABASE_URL`/`POSTGRES_URL`, SQLite remains the local/CI fallback. Back it up before upgrades and restrict/encrypt backups because it contains OAuth tokens. In production use HTTPS; the session cookie is HttpOnly, SameSite=Lax, and Secure. There is no application role gate, so restrict network access.
 
+## Route policy and the multi-user model
+
+**Public routes** (no session required): `GET /health`, `GET /auth/github`,
+`GET /auth/github/callback`, and the Cron boundary `GET /api/cron/scheduler`
+(`CRON_SECRET` + `User-Agent: vercel-cron/1.0`). The internal
+`POST /scheduler/tick` is reachable only with a valid `CRON_SECRET` and is not
+subject to the browser same-origin check.
+
+**Protected routes** are bound to one identity. Identity is a single GitHub
+account: one authenticated GitHub account is exactly one user, and there is no
+shared organization, team, or application role anywhere. A user's GitHub
+connection, OAuth tokens, repository selection, scans, release packs, decisions,
+schedule, operations, and audit are per-user. Protected API routes answer
+`401` without a session, a generic `403` for a cross-user resource, and `429`
+when the caller is at the scan-concurrency limit. Protected dashboard routes
+redirect to `/settings/github` when the browser has no session and never render
+another user's data.
+
+**Token protection.** OAuth access and refresh tokens never leave the FastAPI
+process, are **encrypted at rest** (stdlib-only authenticated encryption; key
+from `TOKEN_ENCRYPTION_KEY`, or derived from `SESSION_SECRET` when unset), and
+never appear in browser payloads or logs. `RELEASE_MANAGER_API_URL` is
+server-only and there are no `NEXT_PUBLIC_` variables.
+
+**Scan concurrency.** `MAX_CONCURRENT_SCANS` bounds the number of concurrent
+in-flight scans per user (integer `1..10`; out-of-range values are clamped;
+the Vercel deployment uses `1`). A manual scan over the limit is refused with
+`429` and makes no GitHub call. Trusted scheduled scans authenticate with
+`CRON_SECRET` and are exempt from this per-user cap.
+
+**Environment variable names** (values live only in your deployment settings):
+
+- Backend: `DATABASE_URL` or `POSTGRES_URL`, `RELEASE_MANAGER_WEB_URL`,
+  `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`,
+  `GITHUB_OAUTH_CALLBACK_URL`, `SESSION_SECRET`, `CRON_SECRET`,
+  `MAX_CONCURRENT_SCANS` (optional, default `1`), `TOKEN_ENCRYPTION_KEY`
+  (optional). Standalone-only: `SCHEDULER_INTERVAL_SECONDS`, `RELEASE_MANAGER_DB`.
+- Frontend: `RELEASE_MANAGER_API_URL` (server-only) and `CRON_SECRET`
+  (identical to the backend value).
+
+**`GITHUB_TOKEN` / `GITHUB_OWNER` / `GITHUB_REPO`** are legacy
+topology-compatibility names only. They are **not** shared production
+authorization for multi-user operation and are ignored by the OAuth path.
+
+**Two Vercel projects.** The `backend` root (FastAPI, `api/index.py`, with its
+own self-contained rewrite) and the `frontend` root (Next.js plus the Cron
+proxy) deploy as separate projects. One Next.js deployment does not and cannot
+route to the Python function through Next rewrites; the console reaches the API
+only through the server-only `RELEASE_MANAGER_API_URL`.
+
 ## Verification
 
 Browser binaries are provisioned once by an operator with `shipyard setup --browser-tests`, never by package scripts.

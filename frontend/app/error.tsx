@@ -1,1 +1,5 @@
-'use client';export default function ErrorPage({reset}:{reset:()=>void}){return <div className="card"><h1>Dashboard unavailable</h1><p>The release service could not be reached.</p><button onClick={reset}>Try again</button></div>}
+'use client';
+import { RetryableError } from '@/components/RetryableError';
+export default function ErrorPage({ reset }: { error: Error; reset: () => void }) {
+  return <RetryableError reset={reset} title="Dashboard unavailable" />;
+}

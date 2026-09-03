@@ -9,6 +9,7 @@ runner are dialect-aware via :mod:`src.db` and :mod:`src.migrations`.
 import json
 
 from .models import primitive
+from .crypto import decrypt_token, encrypt_token
 from .db import advisory_migration_lock, connect_postgres, connect_sqlite, is_integrity_error
 from .migrations import BASE, migrate
 
@@ -18,10 +19,14 @@ class StateError(RuntimeError):
 
 
 class Store:
-    def __init__(self, path: str, *, dialect: str = "sqlite", database_url: str = ""):
+    def __init__(self, path: str, *, dialect: str = "sqlite", database_url: str = "",
+                 token_key: bytes = b""):
         self.path = path
         self.dialect = dialect
         self.database_url = database_url
+        # 32-byte key used to encrypt OAuth tokens at rest. Empty -> tokens are
+        # stored as-is (bare unit tests that never build Settings).
+        self.token_key = token_key or b""
         self.init()
 
     def connect(self):
@@ -60,13 +65,19 @@ class Store:
                 ON CONFLICT(id) DO UPDATE SET login=excluded.login,account_id=excluded.account_id,
                 access_token=excluded.access_token,refresh_token=excluded.refresh_token,
                 expires_at=excluded.expires_at,status='connected',updated_at=excluded.updated_at""",
-                (login, str(account_id) if account_id is not None else None, access_token,
-                 refresh_token, expires_at, selected, now))
+                (login, str(account_id) if account_id is not None else None,
+                 encrypt_token(access_token, key=self.token_key),
+                 encrypt_token(refresh_token, key=self.token_key), expires_at, selected, now))
 
     def github_credentials(self):
         with self.connect() as db:
             row = db.execute("SELECT access_token,refresh_token,expires_at,status FROM github_connection WHERE id=1").fetchone()
-            return dict(row) if row else None
+            if not row:
+                return None
+            data = dict(row)
+            data["access_token"] = decrypt_token(data.get("access_token"), key=self.token_key)
+            data["refresh_token"] = decrypt_token(data.get("refresh_token"), key=self.token_key)
+            return data
 
     def github_connection(self):
         """Safe browser-facing connection data (credential columns excluded)."""
