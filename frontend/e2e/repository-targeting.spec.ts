@@ -3,7 +3,7 @@ import {mkdirSync, rmSync} from 'node:fs';
 import {join} from 'node:path';
 import {BackendProcess} from './support/backend';
 
-const API = 'http://127.0.0.1:18000';
+const API = `http://127.0.0.1:${process.env.SHIPYARD_E2E_API_PORT ?? '18000'}`;
 const A = 'fixture/repository-a';
 const B = 'fixture/repository-b';
 

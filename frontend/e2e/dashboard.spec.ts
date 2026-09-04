@@ -1,7 +1,9 @@
 import {test, expect, Page} from '@playwright/test';
 
+const API = `http://127.0.0.1:${process.env.SHIPYARD_E2E_API_PORT ?? '18000'}`;
+
 async function operationCount(page: Page) {
-  const response = await page.request.get('http://127.0.0.1:18000/api/operations');
+  const response = await page.request.get(`${API}/api/operations`);
   return (await response.json()).length;
 }
 
@@ -27,14 +29,14 @@ async function connectAndSelect(page: Page) {
 
 test.describe.serial('operator workflow', () => {
   test('OAuth callback rejects a missing state', async ({page}) => {
-    await page.goto('http://127.0.0.1:18000/auth/github/callback?code=accepted');
+    await page.goto(`${API}/auth/github/callback?code=accepted`);
     await expect(page).toHaveURL(/\/login\?error=invalid_state/);
     await expect(page.getByText('The sign-in request expired or was invalid. Start again.')).toBeVisible();
   });
 
   test('OAuth callback rejects an arbitrary incorrect state', async ({page}) => {
-    await page.request.get('http://127.0.0.1:18000/auth/github', {maxRedirects: 0});
-    await page.goto('http://127.0.0.1:18000/auth/github/callback?state=arbitrary-incorrect-state&code=accepted');
+    await page.request.get(`${API}/auth/github`, {maxRedirects: 0});
+    await page.goto(`${API}/auth/github/callback?state=arbitrary-incorrect-state&code=accepted`);
     await expect(page).toHaveURL(/\/login\?error=invalid_state/);
     await expect(page.getByText('The sign-in request expired or was invalid. Start again.')).toBeVisible();
   });

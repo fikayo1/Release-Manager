@@ -5,8 +5,12 @@ import { BACKEND_LOG, FRONTEND_LOG } from './e2e/support/logs';
 const macChrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
   ?? (existsSync(macChrome) ? macChrome : undefined);
-const apiURL = 'http://127.0.0.1:18000';
-const webURL = 'http://127.0.0.1:13000';
+// Use dedicated, non-default loopback ports so the suite cannot attach to a
+// developer server. Playwright owns both processes and never reuses them.
+const apiPort = process.env.SHIPYARD_E2E_API_PORT ?? '18000';
+const webPort = process.env.SHIPYARD_E2E_WEB_PORT ?? '13127';
+const apiURL = `http://127.0.0.1:${apiPort}`;
+const webURL = `http://127.0.0.1:${webPort}`;
 const secretCanaries = {
   GITHUB_OAUTH_CLIENT_SECRET: 'oauth-client-secret-browser-canary',
   CRON_SECRET: 'cron-fixed-browser-test-secret',
@@ -26,13 +30,17 @@ export default defineConfig({
   webServer: [
     {
       command: logged(BACKEND_LOG,
-        'env PYTHONPATH=../backend ../.venv/bin/uvicorn tests.e2e_app:app --app-dir .. --host 127.0.0.1 --port 18000'),
+        `env PYTHONPATH=../backend ../.venv/bin/uvicorn tests.e2e_app:app --app-dir .. --host 127.0.0.1 --port ${apiPort}`),
       url: `${apiURL}/health`,
       reuseExistingServer: false,
-      env: secretCanaries,
+      env: {
+        ...secretCanaries,
+        E2E_API_PORT: apiPort,
+        E2E_WEB_URL: webURL,
+      },
     },
     {
-      command: logged(FRONTEND_LOG, 'npm run dev -- --hostname 127.0.0.1 --port 13000'),
+      command: logged(FRONTEND_LOG, `npm run dev -- --hostname 127.0.0.1 --port ${webPort}`),
       url: webURL,
       reuseExistingServer: false,
       env: {

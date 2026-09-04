@@ -19,7 +19,7 @@ export default async function Home() {
     <>
       <div className="hero">
         <p className="eyebrow">Governed releases, from evidence to publication</p>
-        <h1>Home</h1>
+        <h1>Release overview</h1>
         <ScanNowButton />
       </div>
       <div className="grid">

@@ -10,7 +10,7 @@ const SECRETS = [
   'postgres://user:database-url-browser-canary@db.invalid/release',
   'database-url-browser-canary',
 ];
-const API = 'http://127.0.0.1:18000';
+const API = `http://127.0.0.1:${process.env.SHIPYARD_E2E_API_PORT ?? '18000'}`;
 
 test.describe.serial('OAuth acceptance (C1, C2)', () => {
   test('authorizes through deterministic doubles and keeps the token off the browser', async ({page}) => {

@@ -1,6 +1,6 @@
 import {test, expect} from '@playwright/test';
 
-const API = 'http://127.0.0.1:18000';
+const API = `http://127.0.0.1:${process.env.SHIPYARD_E2E_API_PORT ?? '18000'}`;
 const SECRET = 'cron-fixed-browser-test-secret';
 
 test('cron proxy rejects missing proof without backend work', async ({request}) => {
