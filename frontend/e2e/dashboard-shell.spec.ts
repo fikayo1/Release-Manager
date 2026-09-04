@@ -1,10 +1,10 @@
 import {test, expect} from '@playwright/test';
 
 const SECTIONS: [string, RegExp][] = [
-  ['Overview', /\/dashboard$/],
+  ['Home', /\/dashboard$/],
   ['Releases', /\/dashboard\/releases$/],
   ['Operations', /\/dashboard\/operations$/],
-  ['GitHub', /\/dashboard\/settings\/github$/],
+  ['Repos', /\/dashboard\/settings\/github$/],
   ['Schedule', /\/dashboard\/settings\/schedule$/],
 ];
 
@@ -15,7 +15,7 @@ test.describe('editorial sign-in and dashboard shell (C4, C5, C6)', () => {
     await expect(page).toHaveURL(/\/login$/);
     await expect(page.getByRole('heading', {name: /sign in/i})).toBeVisible();
 
-    const button = page.getByRole('link', {name: 'Continue with GitHub'});
+    const button = page.getByRole('link', {name: 'Login with GitHub'});
     await expect(button).toBeVisible();
     await button.click();
     await expect(page).toHaveURL(/\/dashboard$/);
@@ -25,7 +25,7 @@ test.describe('editorial sign-in and dashboard shell (C4, C5, C6)', () => {
   test('C5: a desktop viewport shows a left sidebar (no top nav) with working links and logo', async ({page}) => {
     await page.setViewportSize({width: 1280, height: 900});
     await page.goto('/login');
-    await page.getByRole('link', {name: 'Continue with GitHub'}).click();
+    await page.getByRole('link', {name: 'Login with GitHub'}).click();
     await expect(page).toHaveURL(/\/dashboard$/);
 
     const sidebar = page.getByRole('navigation', {name: 'Dashboard sections'});
@@ -50,7 +50,7 @@ test.describe('editorial sign-in and dashboard shell (C4, C5, C6)', () => {
   test('C5: a narrow viewport collapses the sidebar to a working toggle', async ({page}) => {
     await page.setViewportSize({width: 1280, height: 900});
     await page.goto('/login');
-    await page.getByRole('link', {name: 'Continue with GitHub'}).click();
+    await page.getByRole('link', {name: 'Login with GitHub'}).click();
     await expect(page).toHaveURL(/\/dashboard$/);
     // Ensure the client shell has hydrated before exercising the toggle.
     await expect(page.getByRole('heading', {name: 'Release overview'})).toBeVisible();
@@ -72,7 +72,7 @@ test.describe('editorial sign-in and dashboard shell (C4, C5, C6)', () => {
   test('C6: a gold accent is applied to a primary action and the active nav item', async ({page}) => {
     await page.setViewportSize({width: 1280, height: 900});
     await page.goto('/login');
-    await page.getByRole('link', {name: 'Continue with GitHub'}).click();
+    await page.getByRole('link', {name: 'Login with GitHub'}).click();
     await expect(page).toHaveURL(/\/dashboard$/);
 
     const scan = page.getByRole('button', {name: 'Scan now'});
@@ -81,7 +81,7 @@ test.describe('editorial sign-in and dashboard shell (C4, C5, C6)', () => {
     expect(scanBg).toBe('rgb(201, 162, 39)');
 
     const active = page.getByRole('navigation', {name: 'Dashboard sections'})
-      .getByRole('link', {name: 'Overview'});
+      .getByRole('link', {name: 'Home'});
     const activeColor = await active.evaluate((el) => getComputedStyle(el).color);
     expect(activeColor).toBe('rgb(111, 82, 12)');
   });

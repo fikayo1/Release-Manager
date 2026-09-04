@@ -9,13 +9,13 @@ const B = 'fixture/repository-b';
 
 async function ensureConnected(page: Page) {
   await page.goto('/login');
-  const loginLink = page.getByRole('link', {name: 'Continue with GitHub'});
+  const loginLink = page.getByRole('link', {name: 'Login with GitHub'});
   if (await loginLink.isVisible().catch(() => false)) {
     await loginLink.click();
     await expect(page).toHaveURL(/\/dashboard$/);
   }
   await page.goto('/dashboard/settings/github');
-  const link = page.getByRole('link', {name: 'Continue with GitHub'});
+  const link = page.getByRole('link', {name: 'Login with GitHub'});
   if (await link.isVisible().catch(() => false)) {
     await link.click();
     await expect(page).toHaveURL(/github=connected/);

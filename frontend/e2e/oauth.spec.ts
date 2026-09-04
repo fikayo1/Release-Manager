@@ -21,7 +21,7 @@ test.describe.serial('OAuth acceptance (C1, C2)', () => {
     page.on('console', m => consoleLines.push(m.text()));
     page.on('response', async r => { try { responseBodies.push(await r.text()); } catch { /* opaque */ } });
 
-    // Initiate OAuth through the same-origin route the "Continue with GitHub"
+    // Initiate OAuth through the same-origin route the "Login with GitHub"
     // link targets. Re-authorising is idempotent.
     await page.goto('/login');
     await page.request.post(`${API}/test/github/journal/reset`);

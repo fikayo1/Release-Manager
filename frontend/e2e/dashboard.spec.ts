@@ -8,7 +8,7 @@ async function operationCount(page: Page) {
 async function signIn(page: Page) {
   await page.goto('/login');
   if (page.url().includes('/dashboard')) return;
-  await page.getByRole('link', {name: 'Continue with GitHub'}).click();
+  await page.getByRole('link', {name: 'Login with GitHub'}).click();
   await expect(page).toHaveURL(/\/dashboard$/);
 }
 
@@ -16,7 +16,7 @@ async function connectAndSelect(page: Page) {
   await signIn(page);
   await page.goto('/dashboard/settings/github');
   if (!await page.getByText('Connected as').count()) {
-    await page.getByRole('link', {name: 'Continue with GitHub'}).click();
+    await page.getByRole('link', {name: 'Login with GitHub'}).click();
     await expect(page.getByText('Connected as')).toBeVisible();
   }
   if (await page.getByLabel('Repository').inputValue() === 'fixture/repository-a') return;

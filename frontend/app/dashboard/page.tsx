@@ -7,7 +7,7 @@ import { operationTitle } from '@/lib/labels';
 import { ScanNowButton } from '@/components/ScanNowButton';
 import { StatusBadge } from '@/components/StatusBadge';
 
-export default async function Overview() {
+export default async function Home() {
   const [operations, releases, schedule] = await guard(() =>
     Promise.all([
       api<any[]>('/api/operations'),
@@ -19,7 +19,7 @@ export default async function Overview() {
     <>
       <div className="hero">
         <p className="eyebrow">Governed releases, from evidence to publication</p>
-        <h1>Release overview</h1>
+        <h1>Home</h1>
         <ScanNowButton />
       </div>
       <div className="grid">
@@ -41,7 +41,7 @@ export default async function Overview() {
         </section>
         <section>
           <h2>Release packs</h2>
-          <p>{releases.length} total</p>
+          <p>{releases.length ? `${releases.length} draft${releases.length === 1 ? '' : 's'} ready for review.` : 'No release packs yet. Run a scan to draft one.'}</p>
           <Link href="/dashboard/releases">Review releases</Link>
         </section>
       </div>

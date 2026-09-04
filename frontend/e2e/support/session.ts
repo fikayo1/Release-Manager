@@ -8,7 +8,7 @@ import {expect, Page} from '@playwright/test';
 export async function signIn(page: Page) {
   await page.goto('/login');
   if (!page.url().includes('/dashboard')) {
-    await page.getByRole('link', {name: 'Continue with GitHub'}).click();
+    await page.getByRole('link', {name: 'Login with GitHub'}).click();
   }
   await expect(page).toHaveURL(/\/dashboard$/);
 }

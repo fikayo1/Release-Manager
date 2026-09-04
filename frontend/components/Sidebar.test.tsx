@@ -22,10 +22,10 @@ describe('Sidebar', () => {
   it('renders the five section links, a sign-out control, and the logo link to /', () => {
     render(<Sidebar />);
     const nav = screen.getByRole('navigation', { name: 'Dashboard sections' });
-    for (const label of ['Overview', 'Releases', 'Operations', 'GitHub', 'Schedule']) {
+    for (const label of ['Home', 'Releases', 'Operations', 'Repos', 'Schedule']) {
       expect(within(nav).getByRole('link', { name: label })).toBeTruthy();
     }
-    expect(within(nav).getByRole('link', { name: 'Overview' }).getAttribute('href')).toBe('/dashboard');
+    expect(within(nav).getByRole('link', { name: 'Home' }).getAttribute('href')).toBe('/dashboard');
     expect(within(nav).getByRole('link', { name: 'Releases' }).getAttribute('href')).toBe(
       '/dashboard/releases',
     );
@@ -37,13 +37,13 @@ describe('Sidebar', () => {
     mockPath = '/dashboard/releases';
     render(<Sidebar />);
     expect(screen.getByRole('link', { name: 'Releases' }).getAttribute('aria-current')).toBe('page');
-    expect(screen.getByRole('link', { name: 'Overview' }).getAttribute('aria-current')).toBeNull();
+    expect(screen.getByRole('link', { name: 'Home' }).getAttribute('aria-current')).toBeNull();
   });
 
-  it('keeps Overview inactive on nested dashboard routes (exact match only)', () => {
+  it('keeps Home inactive on nested dashboard routes (exact match only)', () => {
     mockPath = '/dashboard/operations';
     render(<Sidebar />);
-    expect(screen.getByRole('link', { name: 'Overview' }).getAttribute('aria-current')).toBeNull();
+    expect(screen.getByRole('link', { name: 'Home' }).getAttribute('aria-current')).toBeNull();
     expect(screen.getByRole('link', { name: 'Operations' }).getAttribute('aria-current')).toBe('page');
   });
 

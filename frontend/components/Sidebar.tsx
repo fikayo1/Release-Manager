@@ -4,10 +4,10 @@ import { usePathname } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 const LINKS: [string, string][] = [
-  ['/dashboard', 'Overview'],
+  ['/dashboard', 'Home'],
   ['/dashboard/releases', 'Releases'],
   ['/dashboard/operations', 'Operations'],
-  ['/dashboard/settings/github', 'GitHub'],
+  ['/dashboard/settings/github', 'Repos'],
   ['/dashboard/settings/schedule', 'Schedule'],
 ];
 

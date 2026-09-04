@@ -28,7 +28,8 @@ export default async function GitHubSettings({
   };
   return (
     <section>
-      <h1>GitHub connection</h1>
+      <h1>Repos</h1>
+      <p>Connect GitHub and choose the repository Release Manager should scan.</p>
       {query.github && alerts[query.github] && (
         <p className="alert" role="alert">
           {alerts[query.github]}
