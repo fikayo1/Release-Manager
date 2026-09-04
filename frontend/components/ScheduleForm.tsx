@@ -25,36 +25,21 @@ function ClauseEditor({ clause, min, max, onChange, onRemove, removable }: { cla
 export function ScheduleForm({ schedule }: { schedule: { expression: string; enabled: boolean } }) {
   const initial = useMemo(() => { try { return { value: parseCron(schedule.expression), error: '' }; } catch (error) { return { value: null, error: error instanceof Error ? error.message : 'Invalid saved schedule.' }; } }, [schedule.expression]);
   const [model, setModel] = useState<CronSchedule | null>(initial.value);
-  const [expression, setExpression] = useState(schedule.expression);
-  const [expressionError, setExpressionError] = useState('');
   const [enabled, setEnabled] = useState(schedule.enabled);
   const [message, setMessage] = useState('');
-  const validation = useMemo(() => { if (expressionError) return expressionError; if (!model) return initial.error; try { serializeCron(model); return ''; } catch (error) { return error instanceof Error ? error.message : 'Invalid schedule.'; } }, [model, initial.error, expressionError]);
-  const update = (key: keyof CronSchedule, value: CronClause[]) => setModel((current) => {
-    if (!current) return current;
-    const next = { ...current, [key]: value };
-    try { setExpression(serializeCron(next)); setExpressionError(''); } catch { /* Keep the editor available while a numeric field is incomplete. */ }
-    return next;
-  });
-  const updateExpression = (value: string) => {
-    setExpression(value);
-    try { setModel(parseCron(value)); setExpressionError(''); }
-    catch { setExpressionError('Enter a valid five-field cron expression.'); }
-  };
+  const validation = useMemo(() => { if (!model) return initial.error; try { serializeCron(model); return ''; } catch (error) { return error instanceof Error ? error.message : 'Invalid schedule.'; } }, [model, initial.error]);
+  const update = (key: keyof CronSchedule, value: CronClause[]) => setModel((current) => current ? { ...current, [key]: value } : current);
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (!model || validation) { setMessage(validation || 'Enter a valid five-field cron expression.'); return; }
+    if (!model || validation) { setMessage(validation || 'Choose a valid schedule.'); return; }
     setMessage('Saving…');
     const response = await fetch('/api/schedule', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ expression: serializeCron(model), enabled }) });
     const data = await response.json(); setMessage(response.ok ? 'Schedule saved' : data.detail || 'Could not save');
   }
   if (!model) return <p className="alert" role="alert">The saved schedule cannot be edited: {initial.error}</p>;
   return <form onSubmit={submit} className="schedule-form">
-    <div className="schedule-heading"><div><h2>Scan timing</h2><p>Choose when automated repository scans run.</p></div><label className="switch"><input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} /> Enabled</label></div>
-    <label>Cron expression (UTC)
-      <input value={expression} onChange={(event) => updateExpression(event.target.value)} aria-invalid={Boolean(expressionError)} />
-    </label>
-    <details className="schedule-guide"><summary>How scheduling works</summary><p>All times use UTC. A run occurs only when minute, hour, day of month, month, and weekday all match. Use Step to select every nth value within every value or a range. Add choices creates a comma-separated list.</p></details>
+    <div className="schedule-heading"><div><h2>Scan timing</h2><p>Choose when automated repository scans run. All times use UTC.</p></div><label className="switch"><input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} /> Enabled</label></div>
+    <details className="schedule-guide"><summary>How scheduling works</summary><p>A run occurs only when minute, hour, day of month, month, and weekday all match. Choose Every value, One value, or Range for each part. Step selects every nth value, and Add choice creates an additional option.</p></details>
     {CRON_FIELDS.map((field) => <fieldset key={field.key}>
       <legend>{field.label} <small>{field.min}–{field.max}</small></legend>
       {model[field.key].map((clause, index) => <ClauseEditor key={index} clause={clause} min={field.min} max={field.max} removable={model[field.key].length > 1} onChange={(next) => update(field.key, model[field.key].map((item, i) => i === index ? next : item))} onRemove={() => update(field.key, model[field.key].filter((_, i) => i !== index))} />)}

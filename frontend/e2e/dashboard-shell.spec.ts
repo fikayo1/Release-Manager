@@ -19,7 +19,7 @@ test.describe('editorial sign-in and dashboard shell (C4, C5, C6)', () => {
     await expect(button).toBeVisible();
     await button.click();
     await expect(page).toHaveURL(/\/dashboard$/);
-    await expect(page.getByRole('heading', {name: 'Release overview'})).toBeVisible();
+    await expect(page.getByRole('heading', {name: 'Home'})).toBeVisible();
   });
 
   test('C5: a desktop viewport shows a left sidebar (no top nav) with working links and logo', async ({page}) => {
@@ -53,7 +53,7 @@ test.describe('editorial sign-in and dashboard shell (C4, C5, C6)', () => {
     await page.getByRole('link', {name: 'Login with GitHub'}).click();
     await expect(page).toHaveURL(/\/dashboard$/);
     // Ensure the client shell has hydrated before exercising the toggle.
-    await expect(page.getByRole('heading', {name: 'Release overview'})).toBeVisible();
+    await expect(page.getByRole('heading', {name: 'Home'})).toBeVisible();
 
     await page.setViewportSize({width: 480, height: 900});
     const nav = page.getByRole('navigation', {name: 'Dashboard sections'});

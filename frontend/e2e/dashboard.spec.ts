@@ -66,7 +66,7 @@ test.describe.serial('operator workflow', () => {
   test('desktop navigation is read-only and manual scan creates a draft', async ({page}) => {
     await connectAndSelect(page);
     await page.goto('/dashboard');
-    await expect(page.getByRole('heading', {name: 'Release overview'})).toBeVisible();
+    await expect(page.getByRole('heading', {name: 'Home'})).toBeVisible();
     const before = await operationCount(page);
     await page.reload(); await page.reload();
     await expect.poll(() => operationCount(page)).toBe(before);
@@ -98,18 +98,32 @@ test.describe.serial('operator workflow', () => {
     await expect.poll(() => operationCount(page)).toBe(before + 1);
   });
 
-  test('schedule validates, persists, disables, and reports heartbeat', async ({page}) => {
+  test('human-readable schedule controls persist a constrained schedule', async ({page}) => {
     await connectAndSelect(page);
     await page.goto('/dashboard/settings/schedule');
-    await page.getByLabel('Cron expression (UTC)').fill('bad cron');
-    await page.getByRole('button', {name: 'Save schedule'}).click();
-    await expect(page.getByRole('status')).toContainText('valid five-field');
-    await page.getByLabel('Cron expression (UTC)').fill('*/5 * * * *');
+    await expect(page.getByLabel('Cron expression (UTC)')).toHaveCount(0);
+
+    const minute = page.getByRole('group', {name: /Minute/});
+    await minute.getByLabel('Step').fill('5');
+    const day = page.getByRole('group', {name: /Day of month/});
+    await day.getByLabel('Selection').selectOption('value');
+    await day.getByLabel('Value', {exact: true}).fill('15');
+    const month = page.getByRole('group', {name: /Month/});
+    await month.getByLabel('Selection').selectOption('range');
+    await month.getByLabel('From').fill('2');
+    await month.getByLabel('Through').fill('4');
+
     await page.getByLabel('Enabled').check();
+    await expect(page.getByText(/UTC: .*every 5;.*day of month 15; months 2 through 4/)).toBeVisible();
     await page.getByRole('button', {name: 'Save schedule'}).click();
     await expect(page.getByRole('status')).toContainText('Schedule saved');
     await page.reload();
-    await expect(page.getByLabel('Cron expression (UTC)')).toHaveValue('*/5 * * * *');
+
+    await expect(page.getByLabel('Cron expression (UTC)')).toHaveCount(0);
+    await expect(page.getByRole('group', {name: /Minute/}).getByLabel('Step')).toHaveValue('5');
+    await expect(page.getByRole('group', {name: /Day of month/}).getByLabel('Value', {exact: true})).toHaveValue('15');
+    await expect(page.getByRole('group', {name: /Month/}).getByLabel('From')).toHaveValue('2');
+    await expect(page.getByRole('group', {name: /Month/}).getByLabel('Through')).toHaveValue('4');
     await expect(page.getByLabel('Enabled')).toBeChecked();
     await expect(page.getByText(/Heartbeat:/)).not.toContainText('—');
     await page.getByLabel('Enabled').uncheck();
@@ -137,7 +151,7 @@ test.describe.serial('operator workflow', () => {
     await connectAndSelect(page);
     await page.setViewportSize({width: 390, height: 844});
     for (const [path, title] of [
-      ['/dashboard', 'Release overview'],
+      ['/dashboard', 'Home'],
       ['/dashboard/releases', 'Release packs'],
       ['/dashboard/operations', 'Operations'],
       ['/dashboard/settings/schedule', 'UTC scan schedule'],

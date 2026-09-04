@@ -76,7 +76,11 @@ test.describe.serial('repository targeting acceptance (C3-C6)', () => {
     await selectRepo(page, B);
 
     await page.goto('/dashboard/settings/schedule');
-    await page.getByLabel('Cron expression (UTC)').fill('* * * * *');
+    for (const field of ['Minute', 'Hour', 'Day of month', 'Month', 'Weekday']) {
+      const group = page.getByRole('group', {name: new RegExp(field)});
+      await group.getByLabel('Selection').selectOption('wildcard');
+      await group.getByLabel('Step').fill('1');
+    }
     await page.getByLabel('Enabled').check();
     await page.getByRole('button', {name: 'Save schedule'}).click();
     await expect(page.getByRole('status')).toContainText('Schedule saved');
