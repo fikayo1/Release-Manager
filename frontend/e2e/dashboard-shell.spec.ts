@@ -13,6 +13,8 @@ test.describe('editorial sign-in and dashboard shell (C4, C5, C6)', () => {
     const response = await page.goto('/login');
     expect(response?.status()).toBe(200);
     await expect(page).toHaveURL(/\/login$/);
+    await expect(page.locator('.login-card')).toBeVisible();
+    await expect(page.locator('.login-card')).toContainText('Sign in to the console');
     await expect(page.getByRole('heading', {name: /sign in/i})).toBeVisible();
 
     const button = page.getByRole('link', {name: 'Login with GitHub'});
