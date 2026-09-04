@@ -22,10 +22,11 @@ def test_frontend_vercel_project_has_only_next_and_cron_configuration():
     assert "rewrites" not in config
     assert "api/index.py" not in json.dumps(config)
     assert config["functions"]["app/api/cron/scheduler/route.ts"]["maxDuration"] == 60
-    # Every minute must be evaluated: user schedules can select any minute,
-    # hour, weekday, day-of-month, and month in their five-field expression.
+    # Vercel Hobby permits one daily Cron invocation. Manual Scan now remains
+    # the normal on-demand trigger; a higher Vercel plan can opt into a more
+    # frequent scheduler when product requirements need it.
     assert config["crons"] == [
-        {"path": "/api/cron/scheduler", "schedule": "* * * * *"}
+        {"path": "/api/cron/scheduler", "schedule": "0 0 * * *"}
     ]
 
 

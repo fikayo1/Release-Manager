@@ -6,6 +6,6 @@
     }
   },
   "crons": [
-    { "path": "/api/cron/scheduler", "schedule": "* * * * *" }
+    { "path": "/api/cron/scheduler", "schedule": "0 0 * * *" }
   ]
 }
