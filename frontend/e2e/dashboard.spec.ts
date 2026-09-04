@@ -90,6 +90,7 @@ test.describe.serial('operator workflow', () => {
     const release = page.locator('tbody a').first();
     await expect(release).toBeVisible();
     await release.click();
+    await expect(page).toHaveURL(/\/dashboard\/releases\/[^/]+$/, {timeout: 15_000});
     await expect(page.getByRole('heading', {name: 'Rationale'})).toBeVisible();
     await expect(page.getByRole('heading', {name: 'Evidence'})).toBeVisible();
     await expect(page.getByRole('link', {name: 'feat: add deterministic dashboard'})).toBeVisible();
