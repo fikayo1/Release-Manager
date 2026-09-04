@@ -22,8 +22,10 @@ def test_frontend_vercel_project_has_only_next_and_cron_configuration():
     assert "rewrites" not in config
     assert "api/index.py" not in json.dumps(config)
     assert config["functions"]["app/api/cron/scheduler/route.ts"]["maxDuration"] == 60
+    # Every minute must be evaluated: user schedules can select any minute,
+    # hour, weekday, day-of-month, and month in their five-field expression.
     assert config["crons"] == [
-        {"path": "/api/cron/scheduler", "schedule": "0 9 * * *"}
+        {"path": "/api/cron/scheduler", "schedule": "* * * * *"}
     ]
 
 
